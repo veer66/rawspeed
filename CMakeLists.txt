@@ -15,7 +15,7 @@ set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/cmake/Modules/")
 
 include(GNUInstallDirs)
 
-project(rawspeed CXX)
+project(rawspeed CXX C)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 

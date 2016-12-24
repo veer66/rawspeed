@@ -2,44 +2,39 @@ language: generic
 
 os:
   - linux
-  - osx
+
+dist: trusty # *sigh*
+group: unstable
 
 sudo: required
 
-services:
-  - docker
-
-before_install:
-  - if [[ "$TRAVIS_OS_NAME" == "linux" ]]; then docker pull darktable/rawspeed; fi
-  - if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then brew update && brew tap Homebrew/bundle && cd .ci && brew bundle --verbose; fi
+branches:
+  only:
+  - coverity_scan
 
 env:
   global:
-    - SRC_DIR=/build/rawspeed
-    - BUILD_DIR=/build/rawspeed-build
-    - INSTALL_PREFIX=/build/rawspeed-install
+    # The next declaration is the encrypted COVERITY_SCAN_TOKEN, created
+    #   via the "travis encrypt" command using the project repo's public key
+    - secure: "rKETh/WScyiRebr6/7ex3FbMqgSL4gucYPj5Z0+F2UkOC+399MFuxHrZ744NwEPGjVvkL39btDVrViwmjp1BJraslQnuPJ8LS7DaVIQQJKnh/pLF8/BclcbGecXrIbSSAtgy3hwKp8N08DXpmyiyaLXsDrPE3/0Oz8JqT9n8b2nzkLDscJSjX73Gp+4DZiUsVzGYYsHq+1k7YbG0xEFrC0OVU3EyHN/bkOepLYUkEKuPj5yi/nRnHLt/1lVdHWBmvELezXnGfuDeGZGb8TbKDTCsv0sscKFDEzK2kzwpAIZbksBHVIcQS8cqcpx48LkvybXOc0vlrS+jMvSUDKAY62+JDZHZd3hCjSIMFVL9bf9b+7gMeevTMKJfLEe9Ro8bHITrKmy0S1Z+mozxdAkESjmFklKgkHBW72T8ttfz33R30Fr87dP9cRwlX2tiU06o8N13228Mh4vr4Cy1S342OOpnf+aw5pq0EydT1eVhjB+B6kmpGinTWbDNtInir2H0w0GlW1VHDZGWqEIB66Nq9aV7ugOBE6b2nsDmBgLS8Xk9OELnRLq2y51Z9nsVq0EnH4td+ciSDPulY9TuUbvBSioMTs8igArM10NFX3+NE13Nla0QiEp1sCKNgxouh5pfkTgmdRL4sQ0MWDPa/c85BaPBF+3xazbI8jZkB19QHKc="
+    - SRC_DIR="$TRAVIS_BUILD_DIR"
+    - BUILD_DIR="$SRC_DIR/build"
+    - INSTALL_PREFIX="$SRC_DIR/install"
     - CFLAGS="-pipe -Werror" CXXFLAGS="-pipe -Werror"
   matrix:
-    - CC=cc CXX=c++ TARGET=build # default system compiler, all platforms
+    - CC=cc CXX=c++ TARGET=build
 
-matrix:
-  fast_finish: true
-  include:
-  - os: linux
-    sudo: required
-    services:
-      - docker
-    env: CC=clang-3.9 CXX=clang++-3.9 TARGET=build
-  - os: osx
-    env: CC=gcc-6 CXX=g++-6 TARGET=build
+before_install:
+  - sudo apt-get update -qq
+  - sudo apt-get upgrade -qq cmake g++ git libjpeg-dev libpugixml-dev libxml2-utils make ninja-build
+  - echo -n | openssl s_client -connect scan.coverity.com:443 | sed -ne '/-BEGIN CERTIFICATE-/,/-END CERTIFICATE-/p' | sudo tee -a /etc/ssl/certs/ca-
 
-script:
-  - if [[ "$TRAVIS_OS_NAME" == "linux" ]]; then docker run --read-only --volume $TRAVIS_BUILD_DIR:$SRC_DIR:ro --tmpfs $BUILD_DIR --workdir $BUILD_DIR --tmpfs $INSTALL_PREFIX $EXTRA_TMPFS --env CC --env CXX --env CFLAGS --env CXXFLAGS --env SRC_DIR --env BUILD_DIR --env INSTALL_PREFIX --env TARGET darktable/rawspeed sh -c "$SRC_DIR/.ci/ci-script.sh"; fi
-  - if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then
-      export SRC_DIR="$TRAVIS_BUILD_DIR";
-      export BUILD_DIR="$SRC_DIR/build";
-      export INSTALL_PREFIX="$SRC_DIR/install";
-      mkdir "$BUILD_DIR";
-      mkdir "$INSTALL_PREFIX";
-      "$SRC_DIR/.ci/ci-script.sh";
-    fi
+addons:
+  coverity_scan:
+    project:
+      name: "darktable-org/rawspeed"
+      description: "rawspeed ${TRAVIS_COMMIT}"
+    notification_email: lebedev.ri@gmail.com
+    build_command_prepend: "mkdir $BUILD_DIR && mkdir $INSTALL_PREFIX"
+    build_command: "$SRC_DIR/.ci/ci-script.sh"
+    branch_pattern: coverity_scan
