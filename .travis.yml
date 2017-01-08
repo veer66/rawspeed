@@ -20,13 +20,13 @@ env:
     - SRC_DIR="$TRAVIS_BUILD_DIR"
     - BUILD_DIR="$SRC_DIR/build"
     - INSTALL_PREFIX="$SRC_DIR/install"
-    - CFLAGS="-pipe -Werror" CXXFLAGS="-pipe -Werror"
+    - CFLAGS="-pipe" CXXFLAGS="-pipe"
   matrix:
     - CC=cc CXX=c++ TARGET=build
 
 before_install:
   - sudo apt-get update -qq
-  - sudo apt-get upgrade -qq cmake g++ git libjpeg-dev libpugixml-dev libxml2-utils make ninja-build
+  - sudo apt-get upgrade -qq cmake g++ git googletest libjpeg-dev libpugixml-dev libxml2-utils make ninja-build zlib1g-dev
   - echo -n | openssl s_client -connect scan.coverity.com:443 | sed -ne '/-BEGIN CERTIFICATE-/,/-END CERTIFICATE-/p' | sudo tee -a /etc/ssl/certs/ca-
 
 addons:

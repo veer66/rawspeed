@@ -1,3 +1,14 @@
+if(BUILD_TESTING)
+  # want GTEST_ADD_TESTS() macro. NOT THE ACTUAL MODULE!
+  include(GTEST_ADD_TESTS)
+
+  # for the actual gtest:
+
+  # at least in debian, they are the package only installs their source code,
+  # so if one wants to use them, he needs to compile them in-tree
+  include(GoogleTest)
+endif()
+
 if(WITH_PTHREADS)
   set(CMAKE_THREAD_PREFER_PTHREAD 1)
   find_package(Threads REQUIRED)
@@ -9,11 +20,17 @@ else()
   add_definitions(-DNO_PTHREAD)
 endif()
 
+if(WITH_OPENMP)
+  find_package(OpenMP)
+endif()
+
 find_package(Pugixml 1.2 REQUIRED)
 include_directories(SYSTEM ${Pugixml_INCLUDE_DIRS})
 
 find_package(JPEG REQUIRED)
 include_directories(SYSTEM ${JPEG_INCLUDE_DIRS})
+
+CONFIGURE_FILE(${CMAKE_CURRENT_SOURCE_DIR}/config.h.in ${CMAKE_CURRENT_BINARY_DIR}/config.h)
 
 FILE(GLOB RAWSPEED_SOURCES
   "AriDecoder.cpp"
@@ -90,31 +107,81 @@ if(WIN32)
   set(RAWSPEED_LIBS "msvcrt")
 endif(WIN32)
 
-add_library(rawspeed STATIC ${RAWSPEED_SOURCES})
+add_library(rawspeed OBJECT ${RAWSPEED_SOURCES})
 
-set_target_properties(rawspeed
-  PROPERTIES
-    POSITION_INDEPENDENT_CODE True
-)
-
-target_link_libraries(rawspeed ${RAWSPEED_LIBS} ${Pugixml_LIBRARIES} ${JPEG_LIBRARIES})
+list(APPEND RAWSPEED_LIBS ${Pugixml_LIBRARIES} ${JPEG_LIBRARIES})
 
 if(WITH_PTHREADS AND Threads_FOUND)
-  target_link_libraries(rawspeed ${CMAKE_THREAD_LIBS_INIT})
+  list(APPEND RAWSPEED_LIBS ${CMAKE_THREAD_LIBS_INIT})
 endif()
 
-#
-# the rawspeed part is a bit of a hack:
-# the static linking didn't work since it was pulling -lstdc++ and -lm into linker flags.
-# so we do a custom dependency and pretend an imported librawsped.a so no other -l are
-# appended.
-#
-add_library(rawspeed_static STATIC IMPORTED GLOBAL)
-set_target_properties(rawspeed_static
-  PROPERTIES
-    IMPORTED_LOCATION ${CMAKE_CURRENT_BINARY_DIR}/librawspeed.a
-    INTERFACE_LINK_LIBRARIES $<TARGET_PROPERTY:rawspeed,INTERFACE_LINK_LIBRARIES>
-    POSITION_INDEPENDENT_CODE True
-)
-
+add_library(rawspeed_static STATIC $<TARGET_OBJECTS:rawspeed>)
+target_link_libraries(rawspeed_static PUBLIC ${RAWSPEED_LIBS})
 add_dependencies(rawspeed_static rawspeed)
+
+if(WITH_OPENMP AND OPENMP_FOUND)
+  target_link_libraries(rawspeed_static INTERFACE ${OpenMP_CXX_FLAGS})
+endif()
+
+if(BUILD_TESTING)
+  add_custom_target(tests ALL)
+
+  FILE(GLOB RAWSPEED_TEST_SOURCES
+    "RawSpeed.cpp"
+  )
+
+  if(CMAKE_BUILD_TYPE MATCHES "^[Cc][Oo][Vv][Ee][Rr][Aa][Gg][Ee]$")
+    # want all the symbols.
+    add_library(rawspeed_test SHARED $<TARGET_OBJECTS:rawspeed> ${RAWSPEED_TEST_SOURCES})
+  else()
+    add_library(rawspeed_test STATIC $<TARGET_OBJECTS:rawspeed> ${RAWSPEED_TEST_SOURCES})
+  endif()
+  target_link_libraries(rawspeed_test PUBLIC ${RAWSPEED_LIBS})
+  add_dependencies(rawspeed_test rawspeed)
+
+  target_link_libraries(rawspeed_test PUBLIC gtest gmock_main)
+  target_include_directories(rawspeed_test INTERFACE ${CMAKE_CURRENT_BINARY_DIR})
+
+  if(WITH_OPENMP AND OPENMP_FOUND)
+    target_link_libraries(rawspeed_test INTERFACE ${OpenMP_CXX_FLAGS})
+  endif()
+
+  FILE(GLOB RAWSPEED_TESTS_SOURCES
+    "BlackAreaTest.cpp"
+    "CameraMetaDataTest.cpp"
+    "CameraSensorInfoTest.cpp"
+    "ExceptionsTest.cpp"
+    "RawSpeedTest.cpp"
+  )
+
+  foreach(IN ${RAWSPEED_TESTS_SOURCES})
+    get_filename_component(TESTNAME ${IN} NAME_WE)
+
+    add_executable(${TESTNAME} ${IN})
+
+    target_link_libraries(${TESTNAME} rawspeed_test)
+
+    GTEST_ADD_TESTS(${TESTNAME} "" AUTO)
+
+    add_dependencies(tests ${TESTNAME})
+  endforeach()
+endif()
+
+if(BUILD_TOOLS)
+  add_executable(darktable-rs-identify rawspeed-identify.cpp)
+  target_compile_definitions(darktable-rs-identify
+    PRIVATE -DRS_CAMERAS_XML_PATH="${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_DATAROOTDIR}/darktable/rawspeed/cameras.xml"
+  )
+
+  set_target_properties(darktable-rs-identify PROPERTIES LINKER_LANGUAGE CXX)
+
+  target_link_libraries(darktable-rs-identify rawspeed_static)
+
+  install(TARGETS darktable-rs-identify DESTINATION ${CMAKE_INSTALL_BINDIR})
+endif()
+
+if(BUILD_TESTING AND BUILD_TOOLS)
+  add_executable(rstest rstest.cpp md5.cpp)
+  set_target_properties(rstest PROPERTIES LINKER_LANGUAGE CXX)
+  target_link_libraries(rstest rawspeed_test)
+endif()

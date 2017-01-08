@@ -936,6 +936,27 @@
 			<Hint name="wb_offset" value="142"/>
 		</Hints>
 	</Camera>
+	<Camera make="Canon" model="Canon EOS M5">
+		<ID make="Canon" model="EOS M5">Canon EOS M5</ID>
+		<CFA width="2" height="2">
+			<Color x="0" y="0">RED</Color>
+			<Color x="1" y="0">GREEN</Color>
+			<Color x="0" y="1">GREEN</Color>
+			<Color x="1" y="1">BLUE</Color>
+		</CFA>
+		<Crop x="266" y="38" width="0" height="0"/>
+		<Sensor black="2048" white="16000"/>
+		<Sensor black="512" white="16000" iso_list="100 125 200 250"/>
+		<Sensor black="512" white="13200" iso_list="160"/>
+		<Sensor black="2048" white="13200" iso_list="320 640 1250 2500 5000"/>
+		<BlackAreas>
+			<Vertical x="4" width="260"/>
+			<Horizontal y="4" height="30"/>
+		</BlackAreas>
+		<Hints>
+			<Hint name="wb_offset" value="142"/>
+		</Hints>
+	</Camera>
 	<Camera make="Canon" model="Canon EOS M10">
 		<ID make="Canon" model="EOS M10">Canon EOS M10</ID>
 		<CFA width="2" height="2">
@@ -5155,6 +5176,39 @@
 		<Crop x="0" y="0" width="-208" height="0"/>
 		<Sensor black="150" white="3956"/>
 	</Camera>
+	<Camera make="Panasonic" model = "DMC-GF6" mode= "16:9">
+		<ID make="Panasonic" model="DMC-GF6">Panasonic DMC-GF6</ID>
+		<CFA width="2" height="2">
+			<Color x="0" y="0">GREEN</Color>
+			<Color x="1" y="0">RED</Color>
+			<Color x="0" y="1">BLUE</Color>
+			<Color x="1" y="1">GREEN</Color>
+		</CFA>
+		<Crop x="0" y="0" width="-208" height="0"/>
+		<Sensor black="150" white="3956"/>
+	</Camera>
+	<Camera make="Panasonic" model = "DMC-GF6" mode= "3:2">
+		<ID make="Panasonic" model="DMC-GF6">Panasonic DMC-GF6</ID>
+		<CFA width="2" height="2">
+			<Color x="0" y="0">GREEN</Color>
+			<Color x="1" y="0">RED</Color>
+			<Color x="0" y="1">BLUE</Color>
+			<Color x="1" y="1">GREEN</Color>
+		</CFA>
+		<Crop x="0" y="0" width="-208" height="0"/>
+		<Sensor black="150" white="3956"/>
+	</Camera>
+	<Camera make="Panasonic" model = "DMC-GF6" mode= "1:1">
+		<ID make="Panasonic" model="DMC-GF6">Panasonic DMC-GF6</ID>
+		<CFA width="2" height="2">
+			<Color x="0" y="0">GREEN</Color>
+			<Color x="1" y="0">RED</Color>
+			<Color x="0" y="1">BLUE</Color>
+			<Color x="1" y="1">GREEN</Color>
+		</CFA>
+		<Crop x="0" y="0" width="-34" height="0"/>
+		<Sensor black="150" white="3956"/>
+	</Camera>
 	<Camera make="Panasonic" model="DMC-GF7">
 		<ID make="Panasonic" model="DMC-GF7">Panasonic DMC-GF7</ID>
 		<CFA width="2" height="2">
@@ -6797,6 +6851,9 @@
 			<Vertical x="0" width="8"/>
 		</BlackAreas>
 	</Camera>
+	<Camera make="PENTAX" model="PENTAX K-5" mode="dng">
+		<ID make="Pentax" model="K-5">PENTAX K-5</ID>
+	</Camera>
 	<Camera make="PENTAX" model="PENTAX K-5 II" decoder_version="2">
 		<ID make="Pentax" model="K-5 II">PENTAX K-5 II</ID>
 		<CFA width="2" height="2">
@@ -8374,6 +8431,19 @@
 		<Crop x="4" y="0" width="-52" height="0"/>
 		<Sensor black="1024" white="16383"/>
 	</Camera>
+	<Camera make="FUJIFILM" model="X-E2S">
+		<ID make="Fujifilm" model="X-E2S">Fujifilm X-E2S</ID>
+		<CFA2 width="6" height="6">
+			<ColorRow y="0">RBGBRG</ColorRow>
+			<ColorRow y="1">GGRGGB</ColorRow>
+			<ColorRow y="2">GGBGGR</ColorRow>
+			<ColorRow y="3">BRGRBG</ColorRow>
+			<ColorRow y="4">GGBGGR</ColorRow>
+			<ColorRow y="5">GGRGGB</ColorRow>
+		</CFA2>
+		<Crop x="4" y="0" width="-52" height="0"/>
+		<Sensor black="1024" white="16383"/>
+        </Camera>
 	<Camera make="FUJIFILM" model="X-T1">
 		<ID make="Fujifilm" model="X-T1">Fujifilm X-T1</ID>
 		<CFA2 width="6" height="6">
@@ -8849,6 +8919,9 @@
 	<Camera make="Canon" model="Canon PowerShot A720 IS" mode="dng">
 		<ID make="Canon" model="PowerShot A720 IS">Canon PowerShot A720 IS</ID>
 	</Camera>
+	<Camera make="Canon" model="Canon PowerShot SX40 HS" mode="dng">
+		<ID make="Canon" model="PowerShot SX40 HS">Canon PowerShot SX40 HS</ID>
+	</Camera>
 	<Camera make="Canon" model="Canon PowerShot SX100 IS" mode="dng">
 		<ID make="Canon" model="PowerShot SX100 IS">Canon PowerShot SX100 IS</ID>
 	</Camera>
@@ -8872,6 +8945,18 @@
 	</Camera>
 	<Camera make="SAMSUNG DIGITAL IMA" model="SAMSUNG GX20" mode="dng">
 		<ID make="Samsung" model="GX20">Samsung GX20</ID>
+	</Camera>
+	<Camera make="Nokia" model="Lumia 1020" mode="dng">
+		<ID make="Nokia" model="Lumia 1020">Nokia Lumia 1020</ID>
+	</Camera>
+	<Camera make="PENTAX" model="PENTAX K-r" mode="dng">
+		<ID make="Pentax" model="K-r">PENTAX K-r</ID>
+	</Camera>
+	<Camera make="PENTAX Corporation" model="PENTAX K10D" mode="dng">
+		<ID make="Pentax" model="K10D">PENTAX K10D</ID>
+	</Camera>
+	<Camera make="Nikon" model="LS-5000" mode="dng">
+		<ID make="Nikon" model="LS-5000">Nikon LS-5000</ID>
 	</Camera>
 	<!-- CHDK Cameras -->
 	<Camera make="AVT" model="F-080C" supported="no" mode="chdk">

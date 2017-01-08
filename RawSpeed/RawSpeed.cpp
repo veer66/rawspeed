@@ -1,10 +1,8 @@
-#ifndef RAW_DECODER_EXCEPTION_H
-#define RAW_DECODER_EXCEPTION_H
-
-/* 
+/*
     RawSpeed - RAW file decoder.
 
     Copyright (C) 2009-2014 Klaus Post
+    Copyright (C) 2016 Roman Lebedev
 
     This library is free software; you can redistribute it and/or
     modify it under the terms of the GNU Lesser General Public
@@ -19,26 +17,23 @@
     You should have received a copy of the GNU Lesser General Public
     License along with this library; if not, write to the Free Software
     Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
-
-    http://www.klauspost.com
 */
 
 #include "StdAfx.h"
-#include <stdexcept>
-#include <string>
+#include <gmock/gmock.h> // for InitGoogleTest, RUN_ALL_TESTS
+#include <iostream>      // for operator<<, basic_ostream, basic...
 
-namespace RawSpeed {
-
-void ThrowRDE(const char* fmt, ...) __attribute__ ((format (printf, 1, 2)));
-
-class RawDecoderException : public std::runtime_error
-{
-public:
-  RawDecoderException(const std::string _msg) : runtime_error(_msg) {
-    _RPT1(0, "RawDecompressor Exception: %s\n", _msg.c_str());
-  }
-};
-
-} // namespace RawSpeed
-
+#ifdef _OPENMP
+#include <omp.h>
 #endif
+
+using namespace RawSpeed;
+
+// define this function, it is only declared in rawspeed:
+int rawspeed_get_number_of_processor_cores() {
+#ifdef _OPENMP
+  return omp_get_num_procs();
+#else
+  return 1;
+#endif
+}

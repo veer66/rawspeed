@@ -1,4 +1,4 @@
-rawspeed [![travis-ci](https://travis-ci.org/darktable-org/rawspeed.svg?branch=develop)](https://travis-ci.org/darktable-org/rawspeed) [![appveyor-ci](https://ci.appveyor.com/api/projects/status/7pqy0gdr9mp16xu2/branch/develop?svg=true)](https://ci.appveyor.com/project/LebedevRI/rawspeed/branch/develop) [![coverity status](https://scan.coverity.com/projects/11256/badge.svg)](https://scan.coverity.com/projects/darktable-org-rawspeed)
+rawspeed [![travis-ci](https://travis-ci.org/darktable-org/rawspeed.svg?branch=develop)](https://travis-ci.org/darktable-org/rawspeed) [![appveyor-ci](https://ci.appveyor.com/api/projects/status/7pqy0gdr9mp16xu2/branch/develop?svg=true)](https://ci.appveyor.com/project/LebedevRI/rawspeed/branch/develop) [![codecov](https://codecov.io/gh/darktable-org/rawspeed/branch/develop/graph/badge.svg)](https://codecov.io/gh/darktable-org/rawspeed) [![coverity status](https://scan.coverity.com/projects/11256/badge.svg)](https://scan.coverity.com/projects/darktable-org-rawspeed)
 =========
 
 #RawSpeed Developer Information
@@ -17,7 +17,7 @@ RawSpeed…
 - can add support for new cameras by adding definitions to an xml file.
 - ~~is extensively crash-tested on broken files~~.
 - decodes images from memory, not a file stream. You can use a memory mapped file, but it is rarely faster.
-- is currently tested on more than 500 unique cameras.
+- is currently tested on [![raw.pixls.us - the free raw sample archive](https://raw.pixls.us/button-cameras.php)](https://raw.pixls.us/) unique cameras, on [![raw.pixls.us - the free raw sample archive](https://raw.pixls.us/button-samples.php)](https://raw.pixls.us/) unique samples. **Please contribute samples**!
 - open source under the LGPL v2 license.
 
 RawSpeed does NOT…
