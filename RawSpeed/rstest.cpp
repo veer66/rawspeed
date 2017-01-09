@@ -120,7 +120,8 @@ string img_hash(RawImage &r) {
       memset(d, 0, padding);
   }
   string hash =
-      md5_hash(r->getDataUncropped(0, 0), r->pitch * r->getUncroppedDim().y);
+      md5_hash(r->getDataUncropped(0, 0),
+               static_cast<size_t>(r->pitch) * r->getUncroppedDim().y);
   APPEND("data md5sum: %s\n", hash.c_str());
 
   for (const char *e : r->errors)
@@ -131,7 +132,7 @@ string img_hash(RawImage &r) {
   return oss.str();
 }
 
-void writePPM(RawImage raw, string fn) {
+void writePPM(RawImage raw, const string &fn) {
   FILE *f = fopen(fn.c_str(), "wb");
 
   int width = raw->dim.x;
@@ -142,7 +143,8 @@ void writePPM(RawImage raw, string fn) {
 
   // Write pixels
   for (int y = 0; y < height; ++y) {
-    unsigned short *row = (unsigned short *)raw->getData(0, y);
+    unsigned short *row =
+        reinterpret_cast<unsigned short *>(raw->getData(0, y));
     // Swap for PPM format byte ordering
     if (getHostEndianness() == little)
       for (int x = 0; x < width; ++x)
@@ -153,7 +155,7 @@ void writePPM(RawImage raw, string fn) {
   fclose(f);
 }
 
-size_t process(string filename, CameraMetaData *metadata, bool create,
+size_t process(const string &filename, CameraMetaData *metadata, bool create,
                bool dump) {
 
   const string hashfile(filename + ".hash");
@@ -161,11 +163,18 @@ size_t process(string filename, CameraMetaData *metadata, bool create,
   if (create) {
     // if creating hash, and hash exists - skip current file
     ifstream f(hashfile);
-    if (f.good())
+    if (f.good()) {
+      cout << left << setw(55) << filename << ": hash exists, skipping" << endl;
       return 0;
+    }
   }
 
-  FileReader reader((LPCWSTR)filename.c_str());
+#if defined(WIN32)
+  FileReader reader(static_cast<LPCWSTR>(argv[1]));
+#else
+  FileReader reader(filename.c_str());
+#endif
+
   unique_ptr<FileMap> map = unique_ptr<FileMap>(reader.readFile());
   // FileMap* map = readFile( argv[1] );
 
@@ -217,28 +226,54 @@ size_t process(string filename, CameraMetaData *metadata, bool create,
   return time;
 }
 
+static int usage(const char *progname) {
+  cout << "usage: " << progname << endl
+       << "  [-h] print this help" << endl
+       << "  [-c] for each file, decode, compute hash, and store it." << endl
+       << "       If hash exists - it does not recompute it!" << endl
+       << "  [-d] store decoded image as PPM" << endl
+       << "  <FILE[S]> the file[s] to work on." << endl
+       << endl
+       << "  if no options are passed, for each file, decode, compute hash, "
+          "and the hash file exists, compare hashes."
+       << endl;
+  return EXIT_SUCCESS;
+}
+
 int main(int argc, char **argv) {
 
-  CameraMetaData metadata(CMAKE_SOURCE_DIR "/data/cameras.xml");
-
-  int j = 1;
   auto hasFlag = [&](string flag) {
-    bool ret = argv[j] == flag;
-    j += ret ? 1 : 0;
-    return ret;
+    bool found = false;
+    for (int i = 1; i < argc; ++i) {
+      if (!argv[i] || argv[i] != flag)
+        continue;
+      found = true;
+      argv[i] = nullptr;
+    }
+    return found;
   };
+
+  bool help = hasFlag("-h");
   bool create = hasFlag("-c");
   bool dump = hasFlag("-d");
+
+  if (1 == argc || help)
+    return usage(argv[0]);
+
+  CameraMetaData metadata(CMAKE_SOURCE_DIR "/data/cameras.xml");
 
   size_t time = 0;
   vector<string> failedTests;
 #ifdef _OPENMP
 #pragma omp parallel for default(shared) schedule(static, 1) reduction(+ : time)
 #endif
-  for (int i = j; i < argc; ++i) {
+  for (int i = 1; i < argc; ++i) {
+    if (!argv[i])
+      continue;
+
     try {
       time += process(argv[i], &metadata, create, dump);
-    } catch (std::runtime_error e) {
+    } catch (std::runtime_error &e) {
 #ifdef _OPENMP
 #pragma omp critical(io)
 #endif
@@ -249,11 +284,12 @@ int main(int argc, char **argv) {
     }
   }
 
-  cout << "Total decoding time: " << time / 1000.0 << "s" << endl;
+  cout << "Total decoding time: " << time / 1000.0 << "s" << endl << endl;
 
   if (!failedTests.empty()) {
-    cerr << "WARNING: the following tests have failed:\n";
-    for (auto i : failedTests)
+    cerr << "WARNING: the following " << failedTests.size()
+         << " tests have failed:\n";
+    for (const auto &i : failedTests)
       cerr << i << "\n";
   }
 
