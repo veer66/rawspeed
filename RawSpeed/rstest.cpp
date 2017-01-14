@@ -23,15 +23,17 @@
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <fstream> // IWYU pragma: keep
 #include <iomanip>
 #include <iostream>
+#include <map>
 #include <memory>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
-#include <vector>
+#include <utility>
 
 #ifdef _OPENMP
 #include <omp.h>
@@ -164,6 +166,9 @@ size_t process(const string &filename, CameraMetaData *metadata, bool create,
   // if not creating and hash is missing -> skip as well
   ifstream hf(hashfile);
   if (!(hf.good() ^ create)) {
+#ifdef _OPENMP
+#pragma omp critical(io)
+#endif
     cout << left << setw(55) << filename << ": hash "
          << (create ? "exists" : "missing") << ", skipping" << endl;
     return 0;
@@ -238,7 +243,8 @@ static int usage(const char *progname) {
     2. run with option '-c' -> creates .hash for all supported files
     3. build new version to test for regressions
     4. run with no option   -> checks files with existing .hash
-  If the second run shows no errors, you have no regressions.
+  If the second run shows no errors, you have no regressions,
+  otherwise, the diff between hashes is appended to rstest.log
 )";
   return 0;
 }
@@ -266,7 +272,7 @@ int main(int argc, char **argv) {
   CameraMetaData metadata(CMAKE_SOURCE_DIR "/data/cameras.xml");
 
   size_t time = 0;
-  vector<string> failedTests;
+  map<string, string> failedTests;
 #ifdef _OPENMP
 #pragma omp parallel for default(shared) schedule(static, 1) reduction(+ : time)
 #endif
@@ -281,8 +287,9 @@ int main(int argc, char **argv) {
 #pragma omp critical(io)
 #endif
       {
-        failedTests.push_back(string(argv[i]) + " failed: " + e.what());
-        cerr << failedTests.back() << endl;
+        string msg = string(argv[i]) + " failed: " + e.what();
+        cerr << msg << endl;
+        failedTests.emplace(argv[i], msg);
       }
     }
   }
@@ -292,8 +299,25 @@ int main(int argc, char **argv) {
   if (!failedTests.empty()) {
     cerr << "WARNING: the following " << failedTests.size()
          << " tests have failed:\n";
-    for (const auto &i : failedTests)
-      cerr << i << "\n";
+    for (const auto &i : failedTests) {
+      cerr << i.second << "\n";
+#ifndef WIN32
+      const string oldhash(i.first + ".hash");
+      const string newhash(oldhash + ".failed");
+
+      ifstream oldfile(oldhash), newfile(newhash);
+
+      // if neither hashes exist, nothing to append...
+      if (oldfile.good() || newfile.good()) {
+        // DIFF(1): -N, --new-file  treat absent files as empty
+        if (system(("diff -N -u0 \"" + oldhash + "\" \"" + newhash +
+                    "\" >> rstest.log")
+                       .c_str()))
+          ; // this is only to supress the warn-unused-result warning
+      }
+#endif
+    }
+    cerr << "See rstest.log for details.\n";
   }
 
   return failedTests.empty() ? 0 : 1;
