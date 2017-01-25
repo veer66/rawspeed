@@ -21,18 +21,19 @@
 
 #pragma once
 
-#include "io/FileMap.h"
-#include "tiff/CiffIFD.h"
-#include "parsers/CiffParserException.h"
-#include "decoders/RawDecoder.h"
+#include "io/FileMap.h" // for FileMap
 
 namespace RawSpeed {
+
+class CiffIFD;
+
+class RawDecoder;
 
 class CiffParser
 {
 public:
   CiffParser(FileMap* input);
-  virtual ~CiffParser(void);
+  virtual ~CiffParser();
 
   virtual void parseData();
   virtual RawDecoder* getDecoder();

@@ -19,10 +19,39 @@
     Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
 */
 
-#include "common/StdAfx.h"
 #include "decoders/ThreefrDecoder.h"
+#include "common/Common.h" // for ushort16, uint32, int32
+#include "common/Point.h"  // for iPoint2D
+#include "decoders/RawDecoderException.h" // for ThrowRDE, RawDecoderException
 #include "decompressors/HasselbladDecompressor.h"
 #include "decompressors/LJpegPlain.h"
+#include "io/BitPumpMSB32.h"         // for BitPumpMSB32
+#include "io/ByteStream.h"           // for ByteStream
+#include "metadata/CameraMetaData.h" // for CameraMetaData
+#include "tiff/TiffEntry.h"          // for TiffEntry
+#include "tiff/TiffIFD.h"            // for TiffIFD
+#include "tiff/TiffTag.h"            // for ::STRIPOFFSETS, ::MODEL
+#include <algorithm>                 // for max
+#include <array>
+#include <cassert>
+#include <cfloat>
+#include <cmath>
+#include <cstdarg>
+#include <cstdio> // for NULL
+#include <cstdlib>
+#include <cstring>
+#include <iostream> // for ostringstream, operator<<
+#include <list>
+#include <map> // for map, _Rb_tree_iterator
+#include <map>
+#include <memory>
+#include <numeric>
+#include <sstream>
+#include <string>  // for string, operator==, basic_...
+#include <utility> // for pair
+#include <vector>  // for vector
+
+using namespace std;
 
 namespace RawSpeed {
 
@@ -31,9 +60,7 @@ ThreefrDecoder::ThreefrDecoder(TiffIFD *rootIFD, FileMap* file)  :
   decoderVersion = 0;
 }
 
-ThreefrDecoder::~ThreefrDecoder(void) {
-  delete mRootIFD;
-}
+ThreefrDecoder::~ThreefrDecoder() { delete mRootIFD; }
 
 RawImage ThreefrDecoder::decodeRawInternal() {
   vector<TiffIFD*> data = mRootIFD->getIFDsWithTag(STRIPOFFSETS);
@@ -53,7 +80,7 @@ RawImage ThreefrDecoder::decodeRawInternal() {
   // We cannot use fully decoding huffman table,
   // because values are packed two pixels at the time.
   l.mFullDecodeHT = false;
-  map<string,string>::iterator pixelOffset = hints.find("pixelBaseOffset");
+  auto pixelOffset = hints.find("pixelBaseOffset");
   if (pixelOffset != hints.end()) {
     stringstream convert((*pixelOffset).second);
     convert >> l.pixelBaseOffset;

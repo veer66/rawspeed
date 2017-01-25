@@ -21,16 +21,18 @@
 
 #pragma once
 
-#include "parsers/CiffParserException.h"
-#include "tiff/CiffTag.h"
-#include "io/FileMap.h"
+#include "common/Common.h" // for uint32, uchar8, ushort16
+#include "io/FileMap.h"    // for FileMap
+#include "tiff/CiffTag.h"  // for CiffTag
+#include <string>          // for string
+#include <vector>          // for vector
 
 namespace RawSpeed {
 
 /*
  * Tag data type information.
  */
-typedef	enum {
+enum CiffDataType {
 	CIFF_BYTE  = 0x0000,	/* 8-bit unsigned integer */
 	CIFF_ASCII = 0x0800,	/* 8-bit bytes w/ last byte null */
 	CIFF_SHORT = 0x1000,	/* 16-bit unsigned integer */
@@ -38,18 +40,18 @@ typedef	enum {
 	CIFF_MIX   = 0x2000,	/* 32-bit unsigned integer */
 	CIFF_SUB1  = 0x2800,	/* 32-bit unsigned integer */
 	CIFF_SUB2  = 0x3000,	/* 32-bit unsigned integer */
-} CiffDataType;
 
+};
 
 class CiffEntry
 {
 public:
   CiffEntry(FileMap* f, uint32 value_data, uint32 offset);
-  ~CiffEntry(void);
+  ~CiffEntry();
   uint32 getInt(uint32 num=0);
   ushort16 getShort(uint32 num=0);
-  string getString();
-  vector<string> getStrings();
+  std::string getString();
+  std::vector<std::string> getStrings();
   uchar8 getByte(uint32 num=0);
   const uchar8* getData() {return data;}
   uchar8* getDataWrt();
@@ -66,7 +68,7 @@ public:
   bool isInt();
   bool isString();
 protected:
-  string getValueAsString();
+  std::string getValueAsString();
   uchar8* own_data;
   const uchar8* data;
 #ifdef _DEBUG

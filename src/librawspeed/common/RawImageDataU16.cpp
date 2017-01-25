@@ -1,6 +1,3 @@
-#include "common/StdAfx.h"
-#include "common/RawImage.h"
-#include "decoders/RawDecoder.h"  // For exceptions
 /*
     RawSpeed - RAW file decoder.
 
@@ -19,17 +16,25 @@
     You should have received a copy of the GNU Lesser General Public
     License along with this library; if not, write to the Free Software
     Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
-
-
 */
+
+#include "common/Common.h"                // for uint32, ushort16, uchar8
+#include "common/Point.h"                 // for iPoint2D
+#include "common/RawImage.h"              // for RawImageDataU16, TableLookUp
+#include "decoders/RawDecoderException.h" // for ThrowRDE
+#include "metadata/BlackArea.h"           // for BlackArea
+#include <cstdlib>                        // for free, malloc
+#include <cstring>                        // for memset
+#include <vector>                         // for vector
+
 #if defined(__SSE2__)
-#include <emmintrin.h>
+#include <emmintrin.h> // for __m128i, _mm_load_si128
+#include <xmmintrin.h> // for _MM_HINT_T0, _mm_prefetch
 #endif
 
 namespace RawSpeed {
 
-RawImageDataU16::RawImageDataU16(void)
-{
+RawImageDataU16::RawImageDataU16() {
   dataType = TYPE_USHORT16;
   bpp = 2;
 }
@@ -41,14 +46,12 @@ RawImageDataU16::RawImageDataU16(const iPoint2D &_dim, uint32 _cpp)
 
 
 void RawImageDataU16::calculateBlackAreas() {
-  int* histogram = (int*)malloc(4*65536*sizeof(int));
+  auto *histogram = (int *)malloc(4 * 65536 * sizeof(int));
   memset(histogram, 0, 4*65536*sizeof(int));
   int totalpixels = 0;
 
-  for (uint32 i = 0; i < blackAreas.size(); i++) {
-    BlackArea area = blackAreas[i];
-
-    /* Make sure area sizes are multiple of two, 
+  for (auto area : blackAreas) {
+    /* Make sure area sizes are multiple of two,
        so we have the same amount of pixels for each CFA group */
     area.size = area.size - (area.size&1);
 
@@ -57,7 +60,7 @@ void RawImageDataU16::calculateBlackAreas() {
       if ((int)area.offset+(int)area.size > uncropped_dim.y)
         ThrowRDE("RawImageData::calculateBlackAreas: Offset + size is larger than height of image");
       for (uint32 y = area.offset; y < area.offset+area.size; y++) {
-        ushort16 *pixel = (ushort16*)getDataUncropped(mOffset.x, y);
+        auto *pixel = (ushort16 *)getDataUncropped(mOffset.x, y);
         int* localhist = &histogram[(y&1)*(65536*2)];
         for (int x = mOffset.x; x < dim.x+mOffset.x; x++) {
           localhist[((x&1)<<16) + *pixel]++;
@@ -71,7 +74,7 @@ void RawImageDataU16::calculateBlackAreas() {
       if ((int)area.offset+(int)area.size > uncropped_dim.x)
         ThrowRDE("RawImageData::calculateBlackAreas: Offset + size is larger than width of image");
       for (int y = mOffset.y; y < dim.y+mOffset.y; y++) {
-        ushort16 *pixel = (ushort16*)getDataUncropped(area.offset, y);
+        auto *pixel = (ushort16 *)getDataUncropped(area.offset, y);
         int* localhist = &histogram[(y&1)*(65536*2)];
         for (uint32 x = area.offset; x < area.size+area.offset; x++) {
           localhist[((x&1)<<16) + *pixel]++;
@@ -82,8 +85,8 @@ void RawImageDataU16::calculateBlackAreas() {
   }
 
   if (!totalpixels) {
-    for (int i = 0 ; i < 4; i++)
-      blackLevelSeparate[i] = blackLevel;
+    for (int &i : blackLevelSeparate)
+      i = blackLevel;
     free(histogram);
     return;
   }
@@ -106,10 +109,10 @@ void RawImageDataU16::calculateBlackAreas() {
   /* If this is not a CFA image, we do not use separate blacklevels, use average */
   if (!isCFA) {
     int total = 0;
-    for (int i = 0 ; i < 4; i++)
-      total+=blackLevelSeparate[i];
-    for (int i = 0 ; i < 4; i++)
-      blackLevelSeparate[i] = (total+2)>>2;
+    for (int i : blackLevelSeparate)
+      total += i;
+    for (int &i : blackLevelSeparate)
+      i = (total + 2) >> 2;
   }
   free(histogram);
 }
@@ -121,7 +124,7 @@ void RawImageDataU16::scaleBlackWhite() {
     int b = 65536;
     int m = 0;
     for (int row = skipBorder; row < (dim.y - skipBorder);row++) {
-      ushort16 *pixel = (ushort16*)getData(skipBorder, row);
+      auto *pixel = (ushort16 *)getData(skipBorder, row);
       for (int col = skipBorder ; col < gw ; col++) {
         b = MIN(*pixel, b);
         m = MAX(*pixel, m);
@@ -150,21 +153,21 @@ void RawImageDataU16::scaleBlackWhite() {
 
 void RawImageDataU16::scaleValues(int start_y, int end_y) {
   bool use_sse2;
-#ifdef _MSC_VER 
+#ifdef _MSC_VER
   int info[4];
   __cpuid(info, 1);
   use_sse2 = !!(info[3]&(1 << 26));
 #else
-  use_sse2 = TRUE;
+  use_sse2 = true;
 #endif
 
   int depth_values = whitePoint - blackLevelSeparate[0];
   float app_scale = 65535.0f / depth_values;
 
   // Scale in 30.2 fp
-  int full_scale_fp = (int)(app_scale * 4.0f);
+  auto full_scale_fp = (int)(app_scale * 4.0f);
   // Half Scale in 18.14 fp
-  int half_scale_fp = (int)(app_scale * 4095.0f);
+  auto half_scale_fp = (int)(app_scale * 4095.0f);
 
   // Check SSE2
   if (use_sse2 && app_scale < 63) {
@@ -177,12 +180,13 @@ void RawImageDataU16::scaleValues(int start_y, int end_y) {
     __m128i sse_full_scale_fp;
     __m128i sse_half_scale_fp;
 
-    uint32* sub_mul = (uint32*)_aligned_malloc(16*4*2, 16);
+    auto *sub_mul = (uint32 *)_aligned_malloc(16 * 4 * 2, 16);
     if (!sub_mul)
 	  ThrowRDE("Out of memory, failed to allocate 128 bytes");
     uint32 gw = pitch / 16;
     // 10 bit fraction
-    uint32 mul = (int)(1024.0f * 65535.0f / (float)(whitePoint - blackLevelSeparate[mOffset.x&1]));  
+    uint32 mul = (int)(1024.0f * 65535.0f /
+                       (float)(whitePoint - blackLevelSeparate[mOffset.x & 1]));
     mul |= ((int)(1024.0f * 65535.0f / (float)(whitePoint - blackLevelSeparate[(mOffset.x+1)&1])))<<16;
     uint32 b = blackLevelSeparate[mOffset.x&1] | (blackLevelSeparate[(mOffset.x+1)&1]<<16);
 
@@ -220,9 +224,9 @@ void RawImageDataU16::scaleValues(int start_y, int end_y) {
       } else {
         sserandom = _mm_setzero_si128();
       }
-      __m128i* pixel = (__m128i*) & data[(mOffset.y+y)*pitch];
+      auto *pixel = (__m128i *)&data[(mOffset.y + y) * pitch];
       __m128i ssescale, ssesub;
-      if (((y+mOffset.y)&1) == 0) { 
+      if (((y + mOffset.y) & 1) == 0) {
         ssesub = _mm_load_si128((__m128i*)&sub_mul[0]);
         ssescale = _mm_load_si128((__m128i*)&sub_mul[4]);
       } else {
@@ -249,7 +253,7 @@ void RawImageDataU16::scaleValues(int start_y, int end_y) {
         sserandom = _mm_xor_si128(_mm_mulhi_epi16(sserandom, rand_mul), _mm_mullo_epi16(sserandom, rand_mul));
         __m128i rand_masked = _mm_and_si128(sserandom, rand_mask);  // Get 8 random bits
         rand_masked = _mm_mullo_epi16(rand_masked, sse_full_scale_fp);
-        
+
         __m128i zero = _mm_setzero_si128();
         __m128i rand_lo = _mm_sub_epi32(sse_half_scale_fp, _mm_unpacklo_epi16(rand_masked,zero));
         __m128i rand_hi = _mm_sub_epi32(sse_half_scale_fp, _mm_unpackhi_epi16(rand_masked,zero));
@@ -288,7 +292,7 @@ void RawImageDataU16::scaleValues(int start_y, int end_y) {
     }
     for (int y = start_y; y < end_y; y++) {
       int v = dim.x + y * 36969;
-      ushort16 *pixel = (ushort16*)getData(0, y);
+      auto *pixel = (ushort16 *)getData(0, y);
       int *mul_local = &mul[2*(y&1)];
       int *sub_local = &sub[2*(y&1)];
       for (int x = 0 ; x < gw; x++) {
@@ -431,7 +435,7 @@ void RawImageDataU16::fixBadPixel( uint32 x, uint32 y, int component )
       total_pixel += values[i] * weight[i];
 
   total_pixel >>= total_shifts;
-  ushort16* pix = (ushort16*)getDataUncropped(x, y);
+  auto *pix = (ushort16 *)getDataUncropped(x, y);
   pix[component] = clampbits(total_pixel, 16);
 
   /* Process other pixels - could be done inline, since we have the weights */
@@ -444,13 +448,12 @@ void RawImageDataU16::fixBadPixel( uint32 x, uint32 y, int component )
 void RawImageDataU16::doLookup( int start_y, int end_y )
 {
   if (table->ntables == 1) {
-    ushort16* t = table->getTable(0);
     if (table->dither) {
       int gw = uncropped_dim.x * cpp;
-      uint32* t = (uint32*)table->getTable(0);
+      auto *t = (uint32 *)table->getTable(0);
       for (int y = start_y; y < end_y; y++) {
         uint32 v = (uncropped_dim.x + y * 13) ^ 0x45694584;
-        ushort16 *pixel = (ushort16*)getDataUncropped(0, y);
+        auto *pixel = (ushort16 *)getDataUncropped(0, y);
         for (int x = 0 ; x < gw; x++) {
           ushort16 p = *pixel;
           uint32 lookup = t[p];
@@ -466,15 +469,16 @@ void RawImageDataU16::doLookup( int start_y, int end_y )
     }
 
     int gw = uncropped_dim.x * cpp;
+    ushort16 *t = table->getTable(0);
     for (int y = start_y; y < end_y; y++) {
-      ushort16 *pixel = (ushort16*)getDataUncropped(0, y);
+      auto *pixel = (ushort16 *)getDataUncropped(0, y);
       for (int x = 0 ; x < gw; x++) {
         *pixel = t[*pixel];
         pixel ++;
       }
     }
     return;
-  } 
+  }
   ThrowRDE("Table lookup with multiple components not implemented");
 }
 

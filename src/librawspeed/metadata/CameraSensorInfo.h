@@ -20,7 +20,7 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
 
 #pragma once
 
-#include <vector>
+#include <vector> // for vector
 
 namespace RawSpeed {
 
@@ -29,7 +29,7 @@ class CameraSensorInfo
 public:
   CameraSensorInfo(int black_level, int white_level, int min_iso, int max_iso,
                    std::vector<int> black_separate);
-  virtual ~CameraSensorInfo(void);
+  virtual ~CameraSensorInfo();
   bool isIsoWithin(int iso);
   bool isDefault();
   int mBlackLevel;

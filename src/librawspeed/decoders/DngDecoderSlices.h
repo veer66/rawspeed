@@ -21,8 +21,8 @@
 #pragma once
 
 #include "decoders/RawDecoder.h"
-#include <queue>
 #include "decompressors/LJpegPlain.h"
+#include <queue>
 
 namespace RawSpeed {
 
@@ -31,7 +31,7 @@ class DngSliceElement
 public:
   DngSliceElement(uint32 off, uint32 count, uint32 offsetX, uint32 offsetY, uint32 w, uint32 h) :
       byteOffset(off), byteCount(count), offX(offsetX), offY(offsetY), width(w), height(h), mUseBigtable(false) {};
-  ~DngSliceElement(void) {};
+  ~DngSliceElement() = default;
   const uint32 byteOffset;
   const uint32 byteCount;
   const uint32 offX;
@@ -45,12 +45,12 @@ class DngDecoderSlices;
 class DngDecoderThread
 {
 public:
-  DngDecoderThread(void) {}
-  ~DngDecoderThread(void) {}
+  DngDecoderThread() = default;
+  ~DngDecoderThread() = default;
 #ifndef NO_PTHREAD
   pthread_t threadid;
 #endif
-  queue<DngSliceElement> slices;
+  std::queue<DngSliceElement> slices;
   DngDecoderSlices* parent;
 };
 
@@ -59,13 +59,13 @@ class DngDecoderSlices
 {
 public:
   DngDecoderSlices(FileMap *file, const RawImage &img, int compression);
-  ~DngDecoderSlices(void);
+  ~DngDecoderSlices();
   void addSlice(const DngSliceElement &slice);
   void startDecoding();
   void decodeSlice(DngDecoderThread* t);
   int size();
-  queue<DngSliceElement> slices;
-  vector<DngDecoderThread*> threads;
+  std::queue<DngSliceElement> slices;
+  std::vector<DngDecoderThread*> threads;
   FileMap *mFile;
   RawImage mRaw;
   bool mFixLjpeg;

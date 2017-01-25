@@ -1,12 +1,3 @@
-#include "common/StdAfx.h"
-#include "io/FileReader.h"
-#if defined(__unix__) || defined(__APPLE__) 
-#include <sys/types.h>
-#include <sys/stat.h>
-#include <unistd.h>
-#include <fcntl.h>
-//#include <sys/mman.h>
-#endif // __unix__
 /*
     RawSpeed - RAW file decoder.
 
@@ -25,24 +16,32 @@
     You should have received a copy of the GNU Lesser General Public
     License along with this library; if not, write to the Free Software
     Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
-
-
 */
+
+#include "io/FileReader.h"
+#include "io/FileIOException.h" // for FileIOException
+#include <cstdio>               // for fclose, fseek, fopen, fread, ftell
+#include <fcntl.h>              // for SEEK_END, SEEK_SET
+
+#if !defined(__unix__) && !defined(__APPLE__)
+#include <io.h>
+#include <tchar.h>
+#include <windows.h>
+#endif // !defined(__unix__) && !defined(__APPLE__)
 
 namespace RawSpeed {
 
-FileReader::FileReader(LPCWSTR _filename) : mFilename(_filename) {
-}
+FileReader::FileReader(const char *_filename) : mFilename(_filename) {}
 
 FileMap* FileReader::readFile() {
-#if defined(__unix__) || defined(__APPLE__) 
+#if defined(__unix__) || defined(__APPLE__)
   int bytes_read = 0;
   FILE *file;
   char *dest;
   long size;
 
   file = fopen(mFilename, "rb");
-  if (file == NULL)
+  if (file == nullptr)
     throw FileIOException("Could not open file.");
   fseek(file, 0, SEEK_END);
   size = ftell(file);
@@ -59,7 +58,7 @@ FileMap* FileReader::readFile() {
   FileMap *fileData = new FileMap(pa, size);
 
 #else
-  FileMap *fileData = new FileMap(size);
+  auto *fileData = new FileMap(size);
 
   dest = (char *)fileData->getDataWrt(0, size);
   bytes_read = fread(dest, 1, size, file);
@@ -72,7 +71,8 @@ FileMap* FileReader::readFile() {
 
 #else // __unix__
   HANDLE file_h;  // File handle
-  file_h = CreateFile(mFilename, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_FLAG_SEQUENTIAL_SCAN, NULL);
+  file_h = CreateFile(mFilename, GENERIC_READ, FILE_SHARE_READ, nullptr,
+                      OPEN_EXISTING, FILE_FLAG_SEQUENTIAL_SCAN, nullptr);
   if (file_h == INVALID_HANDLE_VALUE) {
     throw FileIOException("Could not open file.");
   }
@@ -86,7 +86,8 @@ FileMap* FileReader::readFile() {
   FileMap *fileData = new FileMap(f_size.LowPart);
 
   DWORD bytes_read;
-  if (! ReadFile(file_h, fileData->getDataWrt(0, fileData->getSize()), fileData->getSize(), &bytes_read, NULL)) {
+  if (!ReadFile(file_h, fileData->getDataWrt(0, fileData->getSize()),
+                fileData->getSize(), &bytes_read, nullptr)) {
     CloseHandle(file_h);
     delete fileData;
     throw FileIOException("Could not read file.");
@@ -97,8 +98,6 @@ FileMap* FileReader::readFile() {
   return fileData;
 }
 
-FileReader::~FileReader(void) {
-
-}
+FileReader::~FileReader() = default;
 
 } // namespace RawSpeed

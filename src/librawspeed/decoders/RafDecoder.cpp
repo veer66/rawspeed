@@ -19,20 +19,37 @@
     Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
 */
 
-#include "common/StdAfx.h"
 #include "decoders/RafDecoder.h"
+#include "common/Common.h"                // for ushort16, TrimSpaces, uint32
+#include "common/Point.h"                 // for iPoint2D, iRectangle2D
+#include "decoders/RawDecoderException.h" // for ThrowRDE
+#include "io/ByteStream.h"                // for ByteStream
+#include "metadata/BlackArea.h"           // for BlackArea
+#include "metadata/Camera.h"              // for Camera
+#include "metadata/CameraMetaData.h"      // for CameraMetaData
+#include "metadata/CameraSensorInfo.h"    // for CameraSensorInfo
+#include "metadata/ColorFilterArray.h"    // for ColorFilterArray
+#include "tiff/TiffEntry.h"               // for TiffEntry
+#include "tiff/TiffIFD.h"                 // for TiffIFD
+#include "tiff/TiffTag.h"                 // for ::MODEL, ::MAKE, ::FUJIOLDWB
+#include <cstdio>                         // for NULL
+#include <map>                            // for map, _Rb_tree_iterator
+#include <string>                         // for string, allocator
+#include <vector>                         // for vector
+
+using namespace std;
 
 namespace RawSpeed {
 
 RafDecoder::RafDecoder(TiffIFD *rootIFD, FileMap* file) :
     RawDecoder(file), mRootIFD(rootIFD) {
   decoderVersion = 1;
-  alt_layout = FALSE;
+  alt_layout = false;
 }
-RafDecoder::~RafDecoder(void) {
+RafDecoder::~RafDecoder() {
   if (mRootIFD)
     delete mRootIFD;
-  mRootIFD = NULL;
+  mRootIFD = nullptr;
 }
 
 RawImage RafDecoder::decodeRawInternal() {
@@ -179,10 +196,10 @@ void RafDecoder::decodeMetaDataInternal(CameraMetaData *meta) {
     rotated->metadata.fujiRotationPos = rotationPos;
 
     int dest_pitch = (int)rotated->pitch / 2;
-    ushort16 *dst = (ushort16*)rotated->getData(0,0);
+    auto *dst = (ushort16 *)rotated->getData(0, 0);
 
     for (int y = 0; y < new_size.y; y++) {
-      ushort16 *src = (ushort16*)mRaw->getData(crop_offset.x, crop_offset.y + y);
+      auto *src = (ushort16 *)mRaw->getData(crop_offset.x, crop_offset.y + y);
       for (int x = 0; x < new_size.x; x++) {
         int h, w;
         if (alt_layout) { // Swapped x and y

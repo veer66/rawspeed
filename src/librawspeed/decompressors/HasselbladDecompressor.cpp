@@ -1,6 +1,3 @@
-#include "common/StdAfx.h"
-#include "decompressors/HasselbladDecompressor.h"
-
 /*
     RawSpeed - RAW file decoder.
 
@@ -22,6 +19,29 @@
     Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
 */
 
+#include "decompressors/HasselbladDecompressor.h"
+#include "common/Common.h"
+#include "common/Point.h"
+#include "io/BitPumpMSB32.h"
+#include "tiff/TiffTag.h"
+#include <algorithm>
+#include <array>
+#include <cassert>
+#include <cfloat>
+#include <cmath>
+#include <cstdarg>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <iostream>
+#include <list>
+#include <map>
+#include <memory>
+#include <numeric>
+#include <sstream>
+#include <string>
+#include <vector>
+
 namespace RawSpeed {
 
 // Returns len bits as a signed value.
@@ -39,7 +59,7 @@ void HasselbladDecompressor::decodeScan()
   // Pixels are packed two at a time, not like LJPEG:
   // [p1_length_as_huffman][p2_length_as_huffman][p0_diff_with_length][p1_diff_with_length]|NEXT PIXELS
   for (uint32 y = 0; y < frame.h; y++) {
-    ushort16 *dest = (ushort16*) mRaw->getData(0, y);
+    auto *dest = (ushort16 *)mRaw->getData(0, y);
     int p1 = 0x8000 + pixelBaseOffset;
     int p2 = 0x8000 + pixelBaseOffset;
     for (uint32 x = 0; x < frame.w; x += 2) {

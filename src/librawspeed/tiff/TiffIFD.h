@@ -21,14 +21,24 @@
 
 #pragma once
 
-#include "io/Buffer.h"
-#include "tiff/TiffEntry.h"
-#include "parsers/TiffParserException.h"
+#include "common/Common.h"               // for uint32, getHostEndianness
+#include "io/Buffer.h"                   // for Buffer (ptr only), DataBuffer
+#include "io/ByteStream.h"               // for ByteStream
+#include "io/FileMap.h"                  // for FileMap
+#include "parsers/TiffParserException.h" // for ThrowTPE
+#include "tiff/TiffTag.h"                // for TiffTag
+#include <map>                           // for map, _Rb_tree_const_iterator
+#include <memory>                        // for unique_ptr
+#include <vector>                        // for vector
 
 namespace RawSpeed {
 
+class TiffEntry;
+
 class TiffIFD;
+
 class TiffRootIFD;
+
 using TiffIFDOwner = std::unique_ptr<TiffIFD>;
 using TiffRootIFDOwner = std::unique_ptr<TiffRootIFD>;
 using TiffEntryOwner = std::unique_ptr<TiffEntry>;
@@ -37,16 +47,16 @@ class TiffIFD
 {
   uint32 nextIFD = 0;
   TiffIFD* parent = nullptr;
-  vector<TiffIFDOwner> subIFDs;
-  map<TiffTag, TiffEntryOwner> entries;
+  std::vector<TiffIFDOwner> subIFDs;
+  std::map<TiffTag, TiffEntryOwner> entries;
 
   friend class TiffEntry;
   friend class RawParser;
   friend TiffRootIFDOwner parseTiff(const Buffer& data);
 
   // make sure we never copy-constuct/assign a TiffIFD to keep the owning subcontainers contents save
-  TiffIFD(const TiffIFD&) = delete;
-  TiffIFD& operator=(const TiffIFD&) = delete;
+  TiffIFD(const TiffIFD &) = delete;            // NOLINT
+  TiffIFD &operator=(const TiffIFD &) = delete; // NOLINT
 
   void add(TiffIFDOwner subIFD);
   void add(TiffEntryOwner entry);
@@ -54,19 +64,19 @@ class TiffIFD
   TiffRootIFDOwner parseMakerNote(TiffEntry *t);
 
 public:
-  TiffIFD() {}
+  TiffIFD() = default;
   TiffIFD(const DataBuffer& data, uint32 offset, TiffIFD* parent);
-  virtual ~TiffIFD() {}
+  virtual ~TiffIFD() = default;
   uint32 getNextIFD() const {return nextIFD;}
   //TODO: make public api totally const
-  vector<TiffIFD*> getIFDsWithTag(TiffTag tag);
+  std::vector<TiffIFD*> getIFDsWithTag(TiffTag tag);
   TiffEntry* getEntry(TiffTag tag) const;
   TiffEntry* getEntryRecursive(TiffTag tag) const;
   bool hasEntry(TiffTag tag) const { return entries.find(tag) != entries.end(); }
   bool hasEntryRecursive(TiffTag tag) const { return getEntryRecursive(tag) != nullptr; }
 
-  const vector<TiffIFDOwner>& getSubIFDs() const { return subIFDs; }
-//  const map<TiffTag, TiffEntry*>& getEntries() const { return entries; }
+  const std::vector<TiffIFDOwner>& getSubIFDs() const { return subIFDs; }
+//  const std::map<TiffTag, TiffEntry*>& getEntries() const { return entries; }
 };
 
 class TiffRootIFD : public TiffIFD
@@ -74,7 +84,8 @@ class TiffRootIFD : public TiffIFD
 public:
   const DataBuffer rootBuffer;
 
-  TiffRootIFD(DataBuffer data, uint32 offset) : TiffIFD(data, offset, nullptr), rootBuffer(data) {}
+  TiffRootIFD(const DataBuffer &data, uint32 offset)
+      : TiffIFD(data, offset, nullptr), rootBuffer(data) {}
 };
 
 inline bool isTiffInNativeByteOrder(const ByteStream& bs, uint32 pos, const char* context = "") {

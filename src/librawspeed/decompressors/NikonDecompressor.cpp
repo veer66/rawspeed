@@ -1,8 +1,3 @@
-#include "common/StdAfx.h"
-#include "decompressors/NikonDecompressor.h"
-#include "io/BitPumpMSB.h"
-#include "decompressors/HuffmanTable.h"
-
 /*
     RawSpeed - RAW file decoder.
 
@@ -21,9 +16,18 @@
     You should have received a copy of the GNU Lesser General Public
     License along with this library; if not, write to the Free Software
     Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
-
-
 */
+
+#include "decompressors/NikonDecompressor.h"
+#include "common/Common.h"              // for uint32, ushort16, clampbits
+#include "common/RawImage.h"            // for RawImage, RawImageData, RawI...
+#include "decompressors/HuffmanTable.h" // for HuffmanTable
+#include "io/BitPumpMSB.h"              // for BitPumpMSB, BitStream<>::fil...
+#include "io/Buffer.h"                  // for Buffer
+#include <cstdio>                       // for size_t, NULL
+#include <vector>                       // for vector, allocator
+
+using namespace std;
 
 namespace RawSpeed {
 
@@ -114,12 +118,12 @@ void decompressNikon(RawImage& mRaw, ByteStream&& data, ByteStream metadata, uin
   uint32 cw = w / 2;
   uint32 random = bits.peekBits(24);
   //allow gcc to devirtualize the calls below
-  RawImageDataU16* rawdata = (RawImageDataU16*)mRaw.get();
+  auto *rawdata = (RawImageDataU16 *)mRaw.get();
   for (uint32 y = 0; y < h; y++) {
     if (split && y == split) {
       ht = createHuffmanTable(huffSelect + 1);
     }
-    ushort16* dest = (ushort16*) & draw[y*pitch];  // Adjust destination
+    auto *dest = (ushort16 *)&draw[y * pitch]; // Adjust destination
     pUp1[y&1] += ht.decodeNext(bits);
     pUp2[y&1] += ht.decodeNext(bits);
     pLeft1 = pUp1[y&1];
@@ -138,7 +142,7 @@ void decompressNikon(RawImage& mRaw, ByteStream&& data, ByteStream metadata, uin
   if (uncorrectedRawValues) {
     mRaw->setTable(&curve[0], curve.size(), false);
   } else {
-    mRaw->setTable(NULL);
+    mRaw->setTable(nullptr);
   }
 }
 

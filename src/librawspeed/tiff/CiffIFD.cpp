@@ -19,11 +19,24 @@
     Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
 */
 
-#include "common/StdAfx.h"
 #include "tiff/CiffIFD.h"
-#include "parsers/CiffParser.h"
+#include "common/Common.h"               // for uint32, get2LE, get4LE, ush...
+#include "io/IOException.h"              // for IOException
+#include "parsers/CiffParserException.h" // for ThrowCPE, CiffParserException
+#include "tiff/CiffEntry.h"              // for CiffEntry, ::CIFF_SUB1, ::C...
+#include <cstdio>                        // for NULL
+#include <map>                           // for map, _Rb_tree_iterator, map...
+#include <string>                        // for allocator, operator==, string
+#include <utility>                       // for pair
+#include <vector>                        // for vector, vector<>::iterator
+
+using namespace std;
 
 namespace RawSpeed {
+
+#define CIFF_DEPTH(_depth)                                                     \
+  if ((depth = (_depth) + 1) > 10)                                             \
+    ThrowCPE("CIFF: sub-micron matryoshka dolls are ignored");
 
 CiffIFD::CiffIFD(FileMap* f, uint32 start, uint32 end, uint32 _depth) {
   CIFF_DEPTH(_depth);
@@ -32,7 +45,7 @@ CiffIFD::CiffIFD(FileMap* f, uint32 start, uint32 end, uint32 _depth) {
   uint32 valuedata_size = get4LE(f->getData(end-4, 4), 0);
   ushort16 dircount = get2LE(f->getData(start+valuedata_size, 2), 0);
 
-//  fprintf(stderr, "Found %d entries between %d and %d after %d data bytes\n", 
+//  fprintf(stderr, "Found %d entries between %d and %d after %d data bytes\n",
 //                  dircount, start, end, valuedata_size);
 
   for (uint32 i = 0; i < dircount; i++) {
@@ -43,7 +56,7 @@ CiffIFD::CiffIFD(FileMap* f, uint32 start, uint32 end, uint32 _depth) {
     if (!mFile->isValid(entry_offset, 10))
       break;
 
-    CiffEntry *t = NULL;
+    CiffEntry *t = nullptr;
     try {
       t = new CiffEntry(f, start, entry_offset);
     } catch (IOException &) { // Ignore unparsable entry
@@ -66,24 +79,23 @@ CiffIFD::CiffIFD(FileMap* f, uint32 start, uint32 end, uint32 _depth) {
   }
 }
 
-
-CiffIFD::~CiffIFD(void) {
-  for (map<CiffTag, CiffEntry*>::iterator i = mEntry.begin(); i != mEntry.end(); ++i) {
-    delete((*i).second);
+CiffIFD::~CiffIFD() {
+  for (auto &i : mEntry) {
+    delete (i.second);
   }
   mEntry.clear();
-  for (vector<CiffIFD*>::iterator i = mSubIFD.begin(); i != mSubIFD.end(); ++i) {
-    delete(*i);
+  for (auto &i : mSubIFD) {
+    delete i;
   }
   mSubIFD.clear();
 }
 
 bool CiffIFD::hasEntryRecursive(CiffTag tag) {
   if (mEntry.find(tag) != mEntry.end())
-    return TRUE;
-  for (vector<CiffIFD*>::iterator i = mSubIFD.begin(); i != mSubIFD.end(); ++i) {
-    if ((*i)->hasEntryRecursive(tag))
-      return TRUE;
+    return true;
+  for (auto &i : mSubIFD) {
+    if (i->hasEntryRecursive(tag))
+      return true;
   }
   return false;
 }
@@ -93,10 +105,10 @@ vector<CiffIFD*> CiffIFD::getIFDsWithTag(CiffTag tag) {
   if (mEntry.find(tag) != mEntry.end()) {
     matchingIFDs.push_back(this);
   }
-  for (vector<CiffIFD*>::iterator i = mSubIFD.begin(); i != mSubIFD.end(); ++i) {
-    vector<CiffIFD*> t = (*i)->getIFDsWithTag(tag);
-    for (uint32 j = 0; j < t.size(); j++) {
-      matchingIFDs.push_back(t[j]);
+  for (auto &i : mSubIFD) {
+    vector<CiffIFD *> t = i->getIFDsWithTag(tag);
+    for (auto j : t) {
+      matchingIFDs.push_back(j);
     }
   }
   return matchingIFDs;
@@ -109,10 +121,10 @@ vector<CiffIFD*> CiffIFD::getIFDsWithTagWhere(CiffTag tag, uint32 isValue) {
     if (entry->isInt() && entry->getInt() == isValue)
       matchingIFDs.push_back(this);
   }
-  for (vector<CiffIFD*>::iterator i = mSubIFD.begin(); i != mSubIFD.end(); ++i) {
-    vector<CiffIFD*> t = (*i)->getIFDsWithTag(tag);
-    for (uint32 j = 0; j < t.size(); j++) {
-      matchingIFDs.push_back(t[j]);
+  for (auto &i : mSubIFD) {
+    vector<CiffIFD *> t = i->getIFDsWithTag(tag);
+    for (auto j : t) {
+      matchingIFDs.push_back(j);
     }
   }
   return matchingIFDs;
@@ -126,10 +138,10 @@ vector<CiffIFD *> CiffIFD::getIFDsWithTagWhere(CiffTag tag,
     if (entry->isString() && isValue == entry->getString())
       matchingIFDs.push_back(this);
   }
-  for (vector<CiffIFD*>::iterator i = mSubIFD.begin(); i != mSubIFD.end(); ++i) {
-    vector<CiffIFD*> t = (*i)->getIFDsWithTag(tag);
-    for (uint32 j = 0; j < t.size(); j++) {
-      matchingIFDs.push_back(t[j]);
+  for (auto &i : mSubIFD) {
+    vector<CiffIFD *> t = i->getIFDsWithTag(tag);
+    for (auto j : t) {
+      matchingIFDs.push_back(j);
     }
   }
   return matchingIFDs;
@@ -139,12 +151,12 @@ CiffEntry* CiffIFD::getEntryRecursive(CiffTag tag) {
   if (mEntry.find(tag) != mEntry.end()) {
     return mEntry[tag];
   }
-  for (vector<CiffIFD*>::iterator i = mSubIFD.begin(); i != mSubIFD.end(); ++i) {
-    CiffEntry* entry = (*i)->getEntryRecursive(tag);
+  for (auto &i : mSubIFD) {
+    CiffEntry *entry = i->getEntryRecursive(tag);
     if (entry)
       return entry;
   }
-  return NULL;
+  return nullptr;
 }
 
 CiffEntry* CiffIFD::getEntryRecursiveWhere(CiffTag tag, uint32 isValue) {
@@ -153,12 +165,12 @@ CiffEntry* CiffIFD::getEntryRecursiveWhere(CiffTag tag, uint32 isValue) {
     if (entry->isInt() && entry->getInt() == isValue)
       return entry;
   }
-  for (vector<CiffIFD*>::iterator i = mSubIFD.begin(); i != mSubIFD.end(); ++i) {
-    CiffEntry* entry = (*i)->getEntryRecursive(tag);
+  for (auto &i : mSubIFD) {
+    CiffEntry *entry = i->getEntryRecursive(tag);
     if (entry)
       return entry;
   }
-  return NULL;
+  return nullptr;
 }
 
 CiffEntry *CiffIFD::getEntryRecursiveWhere(CiffTag tag, const string &isValue) {
@@ -167,12 +179,12 @@ CiffEntry *CiffIFD::getEntryRecursiveWhere(CiffTag tag, const string &isValue) {
     if (entry->isString() && isValue == entry->getString())
       return entry;
   }
-  for (vector<CiffIFD*>::iterator i = mSubIFD.begin(); i != mSubIFD.end(); ++i) {
-    CiffEntry* entry = (*i)->getEntryRecursive(tag);
+  for (auto &i : mSubIFD) {
+    CiffEntry *entry = i->getEntryRecursive(tag);
     if (entry)
       return entry;
   }
-  return NULL;
+  return nullptr;
 }
 
 CiffEntry* CiffIFD::getEntry(CiffTag tag) {
@@ -180,7 +192,7 @@ CiffEntry* CiffIFD::getEntry(CiffTag tag) {
     return mEntry[tag];
   }
   ThrowCPE("CiffIFD: CIFF Parser entry 0x%x not found.", tag);
-  return 0;
+  return nullptr;
 }
 
 

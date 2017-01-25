@@ -1,7 +1,3 @@
-#include <utility>
-
-#include "common/StdAfx.h"
-#include "metadata/CameraSensorInfo.h"
 /*
 RawSpeed - RAW file decoder.
 
@@ -20,9 +16,13 @@ Lesser General Public License for more details.
 You should have received a copy of the GNU Lesser General Public
 License along with this library; if not, write to the Free Software
 Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
-
-
 */
+
+#include "metadata/CameraSensorInfo.h"
+#include <algorithm> // for move
+#include <vector>    // for vector
+
+using namespace std;
 
 namespace RawSpeed {
 
@@ -32,9 +32,7 @@ CameraSensorInfo::CameraSensorInfo(int black_level, int white_level,
     : mBlackLevel(black_level), mWhiteLevel(white_level), mMinIso(min_iso),
       mMaxIso(max_iso), mBlackLevelSeparate(std::move(black_separate)) {}
 
-CameraSensorInfo::~CameraSensorInfo(void)
-{
-}
+CameraSensorInfo::~CameraSensorInfo() = default;
 
 bool CameraSensorInfo::isIsoWithin( int iso )
 {

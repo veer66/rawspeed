@@ -19,11 +19,11 @@
     Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
 */
 
-#include "metadata/CameraMetadataException.h" // for ThrowCME
-#include "parsers/CiffParserException.h"     // for ThrowCPE
+#include "decoders/RawDecoderException.h"     // for ThrowRDE
 #include "io/FileIOException.h"         // for ThrowFIE
 #include "io/IOException.h"             // for ThrowIOE
-#include "decoders/RawDecoderException.h"     // for ThrowRDE
+#include "metadata/CameraMetadataException.h" // for ThrowCME
+#include "parsers/CiffParserException.h"     // for ThrowCPE
 #include "parsers/TiffParserException.h"     // for ThrowTPE
 #include <exception>                 // for exception
 #include <gmock/gmock.h>             // for MakePredicateFormatterFromMatcher
@@ -39,10 +39,9 @@ static const std::string msg("my very Smart error Message #1 !");
 
 template <class T> class ExceptionsTest : public testing::Test {};
 
-typedef testing::Types<CameraMetadataException, CiffParserException,
-                       FileIOException, IOException, RawDecoderException,
-                       TiffParserException>
-    Classes;
+using Classes = testing::Types<CameraMetadataException, CiffParserException,
+                               FileIOException, IOException,
+                               RawDecoderException, TiffParserException>;
 
 TYPED_TEST_CASE(ExceptionsTest, Classes);
 

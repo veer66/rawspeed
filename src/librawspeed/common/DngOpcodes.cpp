@@ -1,6 +1,5 @@
-#include "common/StdAfx.h"
-#include "common/DngOpcodes.h"
-/* 
+
+/*
 RawSpeed - RAW file decoder.
 
 Copyright (C) 2012 Klaus Post
@@ -18,9 +17,18 @@ Lesser General Public License for more details.
 You should have received a copy of the GNU Lesser General Public
 License along with this library; if not, write to the Free Software
 Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
-
-
 */
+
+#include "common/DngOpcodes.h"
+#include "common/RawImage.h"              // for RawImage, RawImageData
+#include "common/Threading.h"             // for pthread_mutex_lock, pthrea...
+#include "decoders/RawDecoderException.h" // for ThrowRDE
+#include "tiff/TiffEntry.h"               // for TiffEntry
+#include <algorithm>                      // for min
+#include <cmath>                          // for lround, pow
+#include <cstddef>                        // for NULL, size_t
+
+using namespace std;
 
 namespace RawSpeed {
 
@@ -85,8 +93,7 @@ DngOpcodes::DngOpcodes(TiffEntry *entry)
   }
 }
 
-DngOpcodes::~DngOpcodes(void)
-{
+DngOpcodes::~DngOpcodes() {
   size_t codes = mOpcodes.size();
   for (uint32 i = 0; i < codes; i++)
     delete mOpcodes[i];
@@ -143,7 +150,7 @@ void OpcodeFixBadPixelsConstant::apply( RawImage &in, RawImage &out, uint32 star
   uint32 offset = crop.x | (crop.y << 16);
   vector<uint32> bad_pos;
   for (uint32 y = startY; y < endY; y++) {
-    ushort16* src = (ushort16*)out->getData(0, y);
+    auto *src = (ushort16 *)out->getData(0, y);
     for (uint32 x = 0; x < (uint32)in->dim.x; x++) {
       if (src[x]== mValue) {
         bad_pos.push_back(offset + ((uint32)x | (uint32)y<<16));
@@ -174,18 +181,18 @@ OpcodeFixBadPixelsList::OpcodeFixBadPixelsList( const uchar8* parameters, uint32
 
   // Read points
   for (uint64 i = 0; i < BadPointCount; i++) {
-    uint32 BadPointRow = (uint32)getLong(&parameters[bytes_used[0]]);
-    uint32 BadPointCol = (uint32)getLong(&parameters[bytes_used[0]+4]);
+    auto BadPointRow = (uint32)getLong(&parameters[bytes_used[0]]);
+    auto BadPointCol = (uint32)getLong(&parameters[bytes_used[0] + 4]);
     bytes_used[0] += 8;
     bad_pos.push_back(BadPointRow | (BadPointCol << 16));
   }
 
   // Read rects
   for (uint64 i = 0; i < BadRectCount; i++) {
-    uint32 BadRectTop = (uint32)getLong(&parameters[bytes_used[0]]);
-    uint32 BadRectLeft = (uint32)getLong(&parameters[bytes_used[0]+4]);
-    uint32 BadRectBottom = (uint32)getLong(&parameters[bytes_used[0]]);
-    uint32 BadRectRight = (uint32)getLong(&parameters[bytes_used[0]+4]);
+    auto BadRectTop = (uint32)getLong(&parameters[bytes_used[0]]);
+    auto BadRectLeft = (uint32)getLong(&parameters[bytes_used[0] + 4]);
+    auto BadRectBottom = (uint32)getLong(&parameters[bytes_used[0]]);
+    auto BadRectRight = (uint32)getLong(&parameters[bytes_used[0] + 4]);
     bytes_used[0] += 16;
     if (BadRectTop < BadRectBottom && BadRectLeft < BadRectRight) {
       for (uint32 y = BadRectLeft; y <= BadRectRight; y++) {
@@ -201,8 +208,8 @@ void OpcodeFixBadPixelsList::apply( RawImage &in, RawImage &out, uint32 startY, 
 {
   iPoint2D crop = in->getCropOffset();
   uint32 offset = crop.x | (crop.y << 16);
-  for (vector<uint32>::iterator i=bad_pos.begin(); i != bad_pos.end(); ++i) {
-    uint32 pos = offset + (*i);
+  for (unsigned int &bad_po : bad_pos) {
+    uint32 pos = offset + bad_po;
     out->mBadPixelPositions.push_back(pos);
   }
 }
@@ -282,7 +289,7 @@ void OpcodeMapTable::apply( RawImage &in, RawImage &out, uint32 startY, uint32 e
 {
   int cpp = out->getCpp();
   for (uint64 y = startY; y < endY; y += mRowPitch) {
-    ushort16 *src = (ushort16*)out->getData(mAoi.getLeft(), y);
+    auto *src = (ushort16 *)out->getData(mAoi.getLeft(), y);
     // Add offset, so this is always first plane
     src+=mFirstPlane;
     for (uint64 x = 0; x < (uint64) mAoi.getWidth(); x += mColPitch) {
@@ -352,7 +359,7 @@ void OpcodeMapPolynomial::apply( RawImage &in, RawImage &out, uint32 startY, uin
 {
   int cpp = out->getCpp();
   for (uint64 y = startY; y < endY; y += mRowPitch) {
-    ushort16 *src = (ushort16*)out->getData(mAoi.getLeft(), y);
+    auto *src = (ushort16 *)out->getData(mAoi.getLeft(), y);
     // Add offset, so this is always first plane
     src+=mFirstPlane;
     for (uint64 x = 0; x < (uint64)mAoi.getWidth(); x += mColPitch) {
@@ -410,10 +417,10 @@ void OpcodeDeltaPerRow::apply( RawImage &in, RawImage &out, uint32 startY, uint3
   if (in->getDataType() == TYPE_USHORT16) {
     int cpp = out->getCpp();
     for (uint64 y = startY; y < endY; y += mRowPitch) {
-      ushort16 *src = (ushort16*)out->getData(mAoi.getLeft(), y);
+      auto *src = (ushort16 *)out->getData(mAoi.getLeft(), y);
       // Add offset, so this is always first plane
       src+=mFirstPlane;
-      int delta = (int)(65535.0f * mDelta[y]);
+      auto delta = (int)(65535.0f * mDelta[y]);
       for (uint64 x = 0; x < (uint64)mAoi.getWidth(); x += mColPitch) {
         for (uint64 p = 0; p < mPlanes; p++)
         {
@@ -424,7 +431,7 @@ void OpcodeDeltaPerRow::apply( RawImage &in, RawImage &out, uint32 startY, uint3
   } else {
     int cpp = out->getCpp();
     for (uint64 y = startY; y < endY; y += mRowPitch) {
-      float *src = (float*)out->getData(mAoi.getLeft(), y);
+      auto *src = (float *)out->getData(mAoi.getLeft(), y);
       // Add offset, so this is always first plane
       src+=mFirstPlane;
       float delta = mDelta[y];
@@ -465,14 +472,13 @@ OpcodeDeltaPerCol::OpcodeDeltaPerCol(const uchar8* parameters, uint32 param_max_
     mDelta[i] = getFloat(&parameters[36+4*i]);
   *bytes_used += 4*mCount;
   mFlags = MultiThreaded;
-  mDeltaX = NULL;
+  mDeltaX = nullptr;
 }
 
-OpcodeDeltaPerCol::~OpcodeDeltaPerCol( void )
-{
+OpcodeDeltaPerCol::~OpcodeDeltaPerCol() {
   if (mDeltaX)
     delete[] mDeltaX;
-  mDeltaX = NULL;
+  mDeltaX = nullptr;
 }
 
 
@@ -500,7 +506,7 @@ void OpcodeDeltaPerCol::apply( RawImage &in, RawImage &out, uint32 startY, uint3
   if (in->getDataType() == TYPE_USHORT16) {
     int cpp = out->getCpp();
     for (uint64 y = startY; y < endY; y += mRowPitch) {
-      ushort16 *src = (ushort16*)out->getData(mAoi.getLeft(), y);
+      auto *src = (ushort16 *)out->getData(mAoi.getLeft(), y);
       // Add offset, so this is always first plane
       src+=mFirstPlane;
       for (uint64 x = 0; x < (uint64)mAoi.getWidth(); x += mColPitch) {
@@ -513,7 +519,7 @@ void OpcodeDeltaPerCol::apply( RawImage &in, RawImage &out, uint32 startY, uint3
   } else {
     int cpp = out->getCpp();
     for (uint64 y = startY; y < endY; y += mRowPitch) {
-      float *src = (float*)out->getData(mAoi.getLeft(), y);
+      auto *src = (float *)out->getData(mAoi.getLeft(), y);
       // Add offset, so this is always first plane
       src+=mFirstPlane;
       for (uint64 x = 0; x < (uint64)mAoi.getWidth(); x += mColPitch) {
@@ -572,10 +578,10 @@ void OpcodeScalePerRow::apply( RawImage &in, RawImage &out, uint32 startY, uint3
   if (in->getDataType() == TYPE_USHORT16) {
     int cpp = out->getCpp();
     for (uint64 y = startY; y < endY; y += mRowPitch) {
-      ushort16 *src = (ushort16*)out->getData(mAoi.getLeft(), y);
+      auto *src = (ushort16 *)out->getData(mAoi.getLeft(), y);
       // Add offset, so this is always first plane
       src+=mFirstPlane;
-      int delta = (int)(1024.0f * mDelta[y]);
+      auto delta = (int)(1024.0f * mDelta[y]);
       for (uint64 x = 0; x < (uint64)mAoi.getWidth(); x += mColPitch) {
         for (uint64 p = 0; p < mPlanes; p++)
         {
@@ -586,7 +592,7 @@ void OpcodeScalePerRow::apply( RawImage &in, RawImage &out, uint32 startY, uint3
   } else {
     int cpp = out->getCpp();
     for (uint64 y = startY; y < endY; y += mRowPitch) {
-      float *src = (float*)out->getData(mAoi.getLeft(), y);
+      auto *src = (float *)out->getData(mAoi.getLeft(), y);
       // Add offset, so this is always first plane
       src+=mFirstPlane;
       float delta = mDelta[y];
@@ -627,14 +633,13 @@ OpcodeScalePerCol::OpcodeScalePerCol(const uchar8* parameters, uint32 param_max_
     mDelta[i] = getFloat(&parameters[36+4*i]);
   *bytes_used += 4*mCount;
   mFlags = MultiThreaded;
-  mDeltaX = NULL;
+  mDeltaX = nullptr;
 }
 
-OpcodeScalePerCol::~OpcodeScalePerCol( void )
-{
+OpcodeScalePerCol::~OpcodeScalePerCol() {
   if (mDeltaX)
     delete[] mDeltaX;
-  mDeltaX = NULL;
+  mDeltaX = nullptr;
 }
 
 
@@ -662,7 +667,7 @@ void OpcodeScalePerCol::apply( RawImage &in, RawImage &out, uint32 startY, uint3
   if (in->getDataType() == TYPE_USHORT16) {
     int cpp = out->getCpp();
     for (uint64 y = startY; y < endY; y += mRowPitch) {
-      ushort16 *src = (ushort16*)out->getData(mAoi.getLeft(), y);
+      auto *src = (ushort16 *)out->getData(mAoi.getLeft(), y);
       // Add offset, so this is always first plane
       src+=mFirstPlane;
       for (uint64 x = 0; x < (uint64)mAoi.getWidth(); x += mColPitch) {
@@ -675,7 +680,7 @@ void OpcodeScalePerCol::apply( RawImage &in, RawImage &out, uint32 startY, uint3
   } else {
     int cpp = out->getCpp();
     for (uint64 y = startY; y < endY; y += mRowPitch) {
-      float *src = (float*)out->getData(mAoi.getLeft(), y);
+      auto *src = (float *)out->getData(mAoi.getLeft(), y);
       // Add offset, so this is always first plane
       src+=mFirstPlane;
       for (uint64 x = 0; x < (uint64)mAoi.getWidth(); x += mColPitch) {
@@ -689,4 +694,4 @@ void OpcodeScalePerCol::apply( RawImage &in, RawImage &out, uint32 startY, uint3
 }
 
 
-} // namespace RawSpeed 
+} // namespace RawSpeed

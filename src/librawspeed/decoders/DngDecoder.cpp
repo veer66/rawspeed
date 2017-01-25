@@ -18,9 +18,28 @@
     Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
 */
 
-#include "common/StdAfx.h"
 #include "decoders/DngDecoder.h"
-#include <iostream>
+#include "common/Common.h"                // for uint32, uchar8, ushort16
+#include "common/DngOpcodes.h"            // for DngOpcodes
+#include "common/Point.h"                 // for iPoint2D, iRectangle2D
+#include "decoders/DngDecoderSlices.h"    // for DngDecoderSlices, DngSlice...
+#include "decoders/RawDecoderException.h" // for ThrowRDE, RawDecoderException
+#include "io/ByteStream.h"                // for ByteStream
+#include "io/IOException.h"               // for IOException
+#include "metadata/BlackArea.h"           // for BlackArea
+#include "metadata/Camera.h"              // for Camera
+#include "metadata/CameraMetaData.h"      // for CameraMetaData
+#include "metadata/ColorFilterArray.h"    // for ColorFilterArray, ::CFA_BLUE
+#include "parsers/TiffParserException.h"  // for TiffParserException
+#include "tiff/TiffEntry.h"               // for TiffEntry, ::TIFF_LONG
+#include "tiff/TiffIFD.h"                 // for TiffIFD, getTiffEndianness
+#include "tiff/TiffTag.h"                 // for ::MODEL, ::MAKE, ::UNIQUEC...
+#include <cstdio>                         // for NULL, printf
+#include <cstring>                        // for memset
+#include <string>                         // for allocator, string, operator+
+#include <vector>                         // for vector, vector<>::iterator
+
+using namespace std;
 
 namespace RawSpeed {
 
@@ -39,10 +58,10 @@ DngDecoder::DngDecoder(TiffIFD *rootIFD, FileMap* file) : RawDecoder(file), mRoo
     mFixLjpeg = false;
 }
 
-DngDecoder::~DngDecoder(void) {
+DngDecoder::~DngDecoder() {
   if (mRootIFD)
     delete mRootIFD;
-  mRootIFD = NULL;
+  mRootIFD = nullptr;
 }
 
 RawImage DngDecoder::decodeRawInternal() {
@@ -52,7 +71,7 @@ RawImage DngDecoder::decodeRawInternal() {
     ThrowRDE("DNG Decoder: No image data found");
 
   // Erase the ones not with JPEG compression
-  for (vector<TiffIFD*>::iterator i = data.begin(); i != data.end();) {
+  for (auto i = data.begin(); i != data.end();) {
     int compression = (*i)->getEntry(COMPRESSION)->getShort();
     bool isSubsampled = false;
     try {
@@ -404,19 +423,19 @@ RawImage DngDecoder::decodeRawInternal() {
   if (raw->hasEntry(LINEARIZATIONTABLE)) {
     TiffEntry *lintable = raw->getEntry(LINEARIZATIONTABLE);
     uint32 len = lintable->count;
-    ushort16 *table = new ushort16[len];
+    auto *table = new ushort16[len];
     lintable->getShortArray(table, len);
     mRaw->setTable(table, len, !uncorrectedRawValues);
     if (!uncorrectedRawValues) {
       mRaw->sixteenBitLookup();
-      mRaw->setTable(NULL);
+      mRaw->setTable(nullptr);
     }
     delete [] table;
 
-    if (0) {
+    if (false) {
       // Test average for bias
       uint32 cw = mRaw->dim.x * mRaw->getCpp();
-      ushort16* pixels = (ushort16*)mRaw->getData(0, 500);
+      auto *pixels = (ushort16 *)mRaw->getData(0, 500);
       float avg = 0.0f;
       for (uint32 x = 0; x < cw; x++) {
         avg += (float)pixels[x];
@@ -498,7 +517,7 @@ void DngDecoder::decodeMetaDataInternal(CameraMetaData *meta) {
 /* DNG Images are assumed to be decodable unless explicitly set so */
 void DngDecoder::checkSupportInternal(CameraMetaData *meta) {
   // We set this, since DNG's are not explicitly added.
-  failOnUnknown = FALSE;
+  failOnUnknown = false;
 
   if (!(mRootIFD->hasEntryRecursive(MAKE) && mRootIFD->hasEntryRecursive(MODEL))) {
     // Check "Unique Camera Model" instead, uses this for both make + model.
@@ -523,14 +542,14 @@ bool DngDecoder::decodeMaskedAreas(TiffIFD* raw) {
   TiffEntry *masked = raw->getEntry(MASKEDAREAS);
 
   if (masked->type != TIFF_SHORT && masked->type != TIFF_LONG)
-    return FALSE;
+    return false;
 
   uint32 nrects = masked->count/4;
   if (0 == nrects)
-    return FALSE;
+    return false;
 
   /* Since we may both have short or int, copy it to int array. */
-  uint32 *rects = new uint32[nrects*4];
+  auto *rects = new uint32[nrects * 4];
   masked->getIntArray(rects, nrects*4);
 
   iPoint2D top = mRaw->getCropOffset();
@@ -540,10 +559,11 @@ bool DngDecoder::decodeMaskedAreas(TiffIFD* raw) {
     iPoint2D bottomright = iPoint2D(rects[i*4+3], rects[i*4+2]);
     // Is this a horizontal box, only add it if it covers the active width of the image
     if (topleft.x <= top.x && bottomright.x >= (mRaw->dim.x+top.x))
-      mRaw->blackAreas.push_back(BlackArea(topleft.y, bottomright.y-topleft.y, FALSE));
+      mRaw->blackAreas.emplace_back(topleft.y, bottomright.y - topleft.y,
+                                    false);
     // Is it a vertical box, only add it if it covers the active height of the image
     else if (topleft.y <= top.y && bottomright.y >= (mRaw->dim.y+top.y)) {
-        mRaw->blackAreas.push_back(BlackArea(topleft.x, bottomright.x-topleft.x, TRUE));
+      mRaw->blackAreas.emplace_back(topleft.x, bottomright.x - topleft.x, true);
     }
   }
   delete[] rects;
@@ -555,18 +575,18 @@ bool DngDecoder::decodeBlackLevels(TiffIFD* raw) {
   if (raw->hasEntry(BLACKLEVELREPEATDIM)) {
     TiffEntry *bleveldim = raw->getEntry(BLACKLEVELREPEATDIM);
     if (bleveldim->count != 2)
-      return FALSE;
+      return false;
     blackdim = iPoint2D(bleveldim->getInt(0), bleveldim->getInt(1));
   }
 
   if (blackdim.x == 0 || blackdim.y == 0)
-    return FALSE;
+    return false;
 
   if (!raw->hasEntry(BLACKLEVEL))
-    return TRUE;
+    return true;
 
   if (mRaw->getCpp() != 1)
-    return FALSE;
+    return false;
 
   TiffEntry* black_entry = raw->getEntry(BLACKLEVEL);
   if ((int)black_entry->count < blackdim.x*blackdim.y)
@@ -610,7 +630,7 @@ bool DngDecoder::decodeBlackLevels(TiffIFD* raw) {
     for (int i = 0; i < 4; i++)
       mRaw->blackLevelSeparate[i] += (int)(black_sum[i&1] / (float)mRaw->dim.x * 2.0f);
   }
-  return TRUE;
+  return true;
 }
 
 void DngDecoder::setBlack(TiffIFD* raw) {

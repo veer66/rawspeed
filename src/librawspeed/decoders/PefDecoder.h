@@ -20,22 +20,26 @@
 
 #pragma once
 
-#include "decoders/RawDecoder.h"
-#include "tiff/TiffIFD.h"
-#include "decompressors/PentaxDecompressor.h"
+#include "common/RawImage.h"     // for RawImage
+#include "decoders/RawDecoder.h" // for RawDecoder
+#include "io/FileMap.h"          // for FileMap
 
 namespace RawSpeed {
+
+class CameraMetaData;
+
+class TiffIFD;
 
 class PefDecoder :
   public RawDecoder
 {
 public:
   PefDecoder(TiffIFD *rootIFD, FileMap* file);
-  virtual ~PefDecoder(void);
-  virtual RawImage decodeRawInternal();
-  virtual void decodeMetaDataInternal(CameraMetaData *meta);
-  virtual void checkSupportInternal(CameraMetaData *meta);
-  virtual TiffIFD* getRootIFD() {return mRootIFD;}
+  ~PefDecoder() override;
+  RawImage decodeRawInternal() override;
+  void decodeMetaDataInternal(CameraMetaData *meta) override;
+  void checkSupportInternal(CameraMetaData *meta) override;
+  TiffIFD *getRootIFD() override { return mRootIFD; }
   TiffIFD *mRootIFD;
 };
 

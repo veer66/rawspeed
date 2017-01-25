@@ -20,24 +20,34 @@
 
 #include "RawSpeed-API.h"
 
-#include <chrono>
-#include <cstdint>
-#include <cstdio>
-#include <cstdlib>
-#include <cstring>
-#include <fstream> // IWYU pragma: keep
-#include <iomanip>
-#include <iostream>
-#include <map>
-#include <memory>
-#include <stdexcept>
-#include <string>
-#include <type_traits>
-#include <utility>
+#include <chrono>      // for milliseconds, steady_clock, duration
+#include <cstdint>     // for uint8_t
+#include <cstdio>      // for snprintf, size_t, fclose, fopen, fpr...
+#include <cstdlib>     // for system
+#include <cstring>     // for memset
+#include <fstream>     // IWYU pragma: keep
+#include <iomanip>     // for setw
+#include <iostream>    // for cout
+#include <map>         // for map
+#include <memory>      // for unique_ptr, allocator
+#include <sstream>     // IWYU pragma: keep
+#include <stdexcept>   // for runtime_error
+#include <string>      // for string, operator+, operator<<, char_...
+#include <type_traits> // for enable_if<>::type
+#include <utility>     // for pair
 
 #ifdef _OPENMP
 #include <omp.h>
 #endif
+
+// define this function, it is only declared in rawspeed:
+int rawspeed_get_number_of_processor_cores() {
+#ifdef _OPENMP
+  return omp_get_num_procs();
+#else
+  return 1;
+#endif
+}
 
 using namespace std;
 using namespace RawSpeed;
@@ -63,7 +73,7 @@ string img_hash(RawImage &r) {
   do {                                                                         \
     snprintf(line, sizeof(line), __VA_ARGS__);                                 \
     oss << line;                                                               \
-  } while (0)
+  } while (false)
 
   APPEND("make: %s\n", r->metadata.make.c_str());
   APPEND("model: %s\n", r->metadata.model.c_str());
@@ -145,8 +155,7 @@ void writePPM(RawImage raw, const string &fn) {
 
   // Write pixels
   for (int y = 0; y < height; ++y) {
-    unsigned short *row =
-        reinterpret_cast<unsigned short *>(raw->getData(0, y));
+    auto *row = reinterpret_cast<unsigned short *>(raw->getData(0, y));
     // Swap for PPM format byte ordering
     if (getHostEndianness() == little)
       for (int x = 0; x < width; ++x)
@@ -174,11 +183,7 @@ size_t process(const string &filename, CameraMetaData *metadata, bool create,
     return 0;
   }
 
-#if defined(WIN32)
-  FileReader reader((LPCWSTR)filename.c_str());
-#else
   FileReader reader(filename.c_str());
-#endif
 
   unique_ptr<FileMap> map = unique_ptr<FileMap>(reader.readFile());
   // FileMap* map = readFile( argv[1] );
@@ -310,11 +315,11 @@ int main(int argc, char **argv) {
       // if neither hashes exist, nothing to append...
       if (oldfile.good() || newfile.good()) {
         // DIFF(1): -N, --new-file  treat absent files as empty
-        string cmd("diff -N -u0 \"");
+        string cmd(R"(diff -N -u0 ")");
         cmd += oldhash;
-        cmd += "\" \"";
+        cmd += R"(" ")";
         cmd += newhash;
-        cmd += "\" >> rstest.log";
+        cmd += R"(" >> rstest.log)";
         if (system(cmd.c_str()))
           ; // NOLINT
       }

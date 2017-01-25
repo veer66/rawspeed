@@ -1,4 +1,4 @@
-/* 
+/*
     RawSpeed - RAW file decoder.
 
     Copyright (C) 2009-2014 Klaus Post
@@ -21,21 +21,28 @@
 
 #pragma once
 
-#include "decoders/RawDecoder.h"
-#include "decompressors/LJpegPlain.h"
-#include "tiff/CiffIFD.h"
+#include "common/Common.h"       // for uint32, ushort16, uchar8
+#include "common/RawImage.h"     // for RawImage
+#include "decoders/RawDecoder.h" // for RawDecoder
+#include "io/BitPumpJPEG.h"      // for BitPumpJPEG
+#include "io/FileMap.h"          // for FileMap
 
 namespace RawSpeed {
+
+class CameraMetaData;
+
+class CiffIFD;
 
 class CrwDecoder :
   public RawDecoder
 {
 public:
   CrwDecoder(CiffIFD *rootIFD, FileMap* file);
-  virtual RawImage decodeRawInternal();
-  virtual void checkSupportInternal(CameraMetaData *meta);
-  virtual void decodeMetaDataInternal(CameraMetaData *meta);
-  virtual ~CrwDecoder(void);
+  RawImage decodeRawInternal() override;
+  void checkSupportInternal(CameraMetaData *meta) override;
+  void decodeMetaDataInternal(CameraMetaData *meta) override;
+  ~CrwDecoder() override;
+
 protected:
   CiffIFD *mRootIFD;
   void makeDecoder(int n, const uchar8 *source);

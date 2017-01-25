@@ -1,12 +1,3 @@
-#include "common/StdAfx.h"
-#include "io/FileWriter.h"
-#if defined(__unix__) || defined(__APPLE__) 
-#include <sys/types.h>
-#include <sys/stat.h>
-#include <unistd.h>
-#include <fcntl.h>
-//#include <sys/mman.h>
-#endif // __unix__
 /*
     RawSpeed - RAW file decoder.
 
@@ -25,25 +16,33 @@
     You should have received a copy of the GNU Lesser General Public
     License along with this library; if not, write to the Free Software
     Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
-
-
 */
+
+#include "io/FileWriter.h"
+#include "common/Common.h"      // for uint32
+#include "io/FileIOException.h" // for FileIOException
+#include <cstdio>               // for fclose, fopen, fwrite, FILE, NULL
+
+#if !defined(__unix__) && !defined(__APPLE__)
+#include <io.h>
+#include <tchar.h>
+#include <windows.h>
+#endif // !defined(__unix__) && !defined(__APPLE__)
 
 namespace RawSpeed {
 
-FileWriter::FileWriter(LPCWSTR _filename) : mFilename(_filename) {
-}
+FileWriter::FileWriter(const char *_filename) : mFilename(_filename) {}
 
 void FileWriter::writeFile(FileMap* filemap, uint32 size) {
   if (size > filemap->getSize())
     size = filemap->getSize();
-#if defined(__unix__) || defined(__APPLE__) 
+#if defined(__unix__) || defined(__APPLE__)
   size_t bytes_written = 0;
   FILE *file;
   char *src;
 
   file = fopen(mFilename, "wb");
-  if (file == NULL)
+  if (file == nullptr)
     throw FileIOException("Could not open file.");
 
   src = (char *)filemap->getData(0, filemap->getSize());
@@ -55,13 +54,15 @@ void FileWriter::writeFile(FileMap* filemap, uint32 size) {
 
 #else // __unix__
   HANDLE file_h;  // File handle
-  file_h = CreateFile(mFilename, GENERIC_WRITE, FILE_SHARE_WRITE, NULL, CREATE_ALWAYS, FILE_FLAG_SEQUENTIAL_SCAN, NULL);
+  file_h = CreateFile(mFilename, GENERIC_WRITE, FILE_SHARE_WRITE, nullptr,
+                      CREATE_ALWAYS, FILE_FLAG_SEQUENTIAL_SCAN, nullptr);
   if (file_h == INVALID_HANDLE_VALUE) {
     throw FileIOException("Could not open file.");
   }
 
   DWORD bytes_written;
-  if (! WriteFile(file_h, filemap->getData(0, filemap->getSize()), size ? size : filemap->getSize(), &bytes_written, NULL)) {
+  if (!WriteFile(file_h, filemap->getData(0, filemap->getSize()),
+                 size ? size : filemap->getSize(), &bytes_written, nullptr)) {
     CloseHandle(file_h);
     throw FileIOException("Could not read file.");
   }
@@ -70,8 +71,6 @@ void FileWriter::writeFile(FileMap* filemap, uint32 size) {
 #endif // __unix__
 }
 
-FileWriter::~FileWriter(void) {
-
-}
+FileWriter::~FileWriter() = default;
 
 } // namespace RawSpeed

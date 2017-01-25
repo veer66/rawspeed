@@ -19,8 +19,30 @@
     Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
 */
 
-#include "common/StdAfx.h"
 #include "decoders/Cr2Decoder.h"
+#include "common/Common.h"
+#include "common/Point.h"
+#include "tiff/TiffEntry.h"
+#include "tiff/TiffTag.h"
+#include <algorithm>
+#include <array>
+#include <cassert>
+#include <cfloat>
+#include <cmath>
+#include <cstdarg>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <iostream>
+#include <list>
+#include <map>
+#include <memory>
+#include <numeric>
+#include <sstream>
+#include <string>
+#include <vector>
+
+using namespace std;
 
 namespace RawSpeed {
 
@@ -29,10 +51,10 @@ Cr2Decoder::Cr2Decoder(TiffIFD *rootIFD, FileMap* file) :
   decoderVersion = 7;
 }
 
-Cr2Decoder::~Cr2Decoder(void) {
+Cr2Decoder::~Cr2Decoder() {
   if (mRootIFD)
     delete mRootIFD;
-  mRootIFD = NULL;
+  mRootIFD = nullptr;
 }
 
 RawImage Cr2Decoder::decodeOldFormat() {
@@ -83,8 +105,8 @@ RawImage Cr2Decoder::decodeOldFormat() {
     procRaw->copyErrorsFrom(mRaw);
 
     for (uint32 y = 0; y < height; y++) {
-      ushort16 *dst = (ushort16*)procRaw->getData(0,y);
-      ushort16 *src = (ushort16*)mRaw->getData(y%2 == 0 ? 0 : width, y/2);
+      auto *dst = (ushort16 *)procRaw->getData(0, y);
+      auto *src = (ushort16 *)mRaw->getData(y % 2 == 0 ? 0 : width, y / 2);
       for (uint32 x = 0; x < width; x++)
         dst[x] = src[x];
     }
@@ -96,14 +118,14 @@ RawImage Cr2Decoder::decodeOldFormat() {
     if (curve->type == TIFF_SHORT && curve->count == 4096) {
       TiffEntry *linearization = mRootIFD->getEntryRecursive((TiffTag)0x123);
       uint32 len = linearization->count;
-      ushort16 *table = new ushort16[len];
+      auto *table = new ushort16[len];
       linearization->getShortArray(table, len);
       if (!uncorrectedRawValues) {
         mRaw->setTable(table, 4096, true);
         // Apply table
         mRaw->sixteenBitLookup();
         // Delete table
-        mRaw->setTable(NULL);
+        mRaw->setTable(nullptr);
       } else {
         // We want uncorrected, but we store the table.
         mRaw->setTable(table, 4096, false);
@@ -162,7 +184,7 @@ RawImage Cr2Decoder::decodeNewFormat() {
   }
 
   // Override with canon_double_height if set.
-  map<string,string>::iterator msb_hint = hints.find("canon_double_height");
+  auto msb_hint = hints.find("canon_double_height");
   if (msb_hint != hints.end())
     doubleHeight = ("true" == (msb_hint->second));
 
@@ -326,8 +348,6 @@ void Cr2Decoder::decodeMetaDataInternal(CameraMetaData *meta) {
       mRaw->metadata.wbCoeffs[1] = (float) wb->getShort(offset + 1);
       mRaw->metadata.wbCoeffs[2] = (float) wb->getShort(offset + 3);
     } else {
-      vector<TiffIFD*> data = mRootIFD->getIFDsWithTag(MODEL);
-
       if (mRootIFD->hasEntryRecursive(CANONSHOTINFO) &&
           mRootIFD->hasEntryRecursive(CANONPOWERSHOTG9WB)) {
         TiffEntry *shot_info = mRootIFD->getEntryRecursive(CANONSHOTINFO);
@@ -475,11 +495,11 @@ void Cr2Decoder::interpolate_420(int w, int h, int start_h , int end_h) {
   // Last pixel should not be interpolated
   w--;
 
-  bool atLastLine = FALSE;
+  bool atLastLine = false;
 
   if (end_h == h) {
     end_h--;
-    atLastLine = TRUE;
+    atLastLine = true;
   }
 
   // Current line
@@ -687,11 +707,11 @@ void Cr2Decoder::interpolate_420_new(int w, int h, int start_h , int end_h) {
   // Last pixel should not be interpolated
   w--;
 
-  bool atLastLine = FALSE;
+  bool atLastLine = false;
 
   if (end_h == h) {
     end_h--;
-    atLastLine = TRUE;
+    atLastLine = true;
   }
 
   // Current line

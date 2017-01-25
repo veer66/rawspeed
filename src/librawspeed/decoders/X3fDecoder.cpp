@@ -18,36 +18,52 @@ License along with this library; if not, write to the Free Software
 Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
 */
 
-#include "common/StdAfx.h"
 #include "decoders/X3fDecoder.h"
-#include "parsers/TiffParser.h"
+#include "common/Common.h"                // for ushort16, uint32, uchar8
+#include "common/Point.h"                 // for iPoint2D, iRectangle2D
+#include "decoders/RawDecoderException.h" // for ThrowRDE
+#include "io/Buffer.h"                    // for Buffer::size_type
+#include "io/ByteStream.h"                // for ByteStream
+#include "parsers/TiffParser.h"           // for parseTiff
+#include "tiff/TiffEntry.h"               // for TiffEntry
+#include "tiff/TiffIFD.h"                 // for TiffRootIFD, TiffRootIFDOwner
+#include "tiff/TiffTag.h"                 // for ::MAKE, ::MODEL
+#include <algorithm>                      // for max
+#include <cstdio>                         // for NULL
+#include <cstdlib>                        // for atoi
+#include <cstring>                        // for memset
+#include <map>                            // for map, _Rb_tree_iterator
+#include <memory>                         // for unique_ptr
+#include <string>                         // for string
+#include <utility>                        // for pair
+#include <vector>                         // for vector, vector<>::iterator
+
+using namespace std;
 
 namespace RawSpeed {
 
-X3fDecoder::X3fDecoder(FileMap* file) :
-RawDecoder(file), bytes(NULL) {
+X3fDecoder::X3fDecoder(FileMap *file) : RawDecoder(file), bytes(nullptr) {
   decoderVersion = 1;
-  huge_table = NULL;
-  line_offsets = NULL;
+  huge_table = nullptr;
+  line_offsets = nullptr;
   bytes = new ByteStream(file, 0, getHostEndianness() == little);
 }
 
-X3fDecoder::~X3fDecoder(void)
-{
+X3fDecoder::~X3fDecoder() {
   if (bytes)
     delete bytes;
   if (huge_table)
     _aligned_free(huge_table);
   if (line_offsets)
     _aligned_free(line_offsets);
-  huge_table = NULL;
-  line_offsets = NULL;
+  huge_table = nullptr;
+  line_offsets = nullptr;
 }
 
-string X3fDecoder::getIdAsString(ByteStream *bytes) {
+string X3fDecoder::getIdAsString(ByteStream *bytes_) {
   uchar8 id[5];
   for (int i = 0; i < 4; i++)
-    id[i] = bytes->getByte();
+    id[i] = bytes_->getByte();
   id[4] = 0;
   return string((const char*)id);
 }
@@ -55,7 +71,7 @@ string X3fDecoder::getIdAsString(ByteStream *bytes) {
 
 RawImage X3fDecoder::decodeRawInternal()
 {
-  vector<X3fImage>::iterator img = mImages.begin();
+  auto img = mImages.begin();
   for (; img !=  mImages.end(); ++img) {
     X3fImage cimg = *img;
     if (cimg.type == 1 || cimg.type == 3) {
@@ -97,7 +113,7 @@ bool X3fDecoder::readName() {
 
   // See if we can find EXIF info and grab the name from there.
   // This is needed for Sigma DP2 Quattro and possibly later cameras.
-  vector<X3fImage>::iterator img = mImages.begin();
+  auto img = mImages.begin();
   for (; img !=  mImages.end(); ++img) {
     X3fImage cimg = *img;
     if (cimg.type == 2 && cimg.format == 0x12 && cimg.dataSize > 100) {
@@ -136,7 +152,7 @@ void X3fDecoder::checkSupportInternal( CameraMetaData *meta )
 
   // If we somehow got to here without a camera, see if we have an image
   // with proper format identifiers.
-  vector<X3fImage>::iterator img = mImages.begin();
+  auto img = mImages.begin();
   for (; img !=  mImages.end(); ++img) {
     X3fImage cimg = *img;
     if (cimg.type == 1 || cimg.type == 3) {
@@ -149,10 +165,10 @@ void X3fDecoder::checkSupportInternal( CameraMetaData *meta )
 
 string X3fDecoder::getProp(const char* key )
 {
-  map<string,string>::iterator prop_it = mProperties.props.find(key);
+  auto prop_it = mProperties.props.find(key);
   if (prop_it != mProperties.props.end())
     return (*prop_it).second;
-  return NULL;
+  return nullptr;
 }
 
 
@@ -168,15 +184,15 @@ void X3fDecoder::decompressSigma( X3fImage &image )
   int bits = 13;
 
   if (image.format == 35) {
-    for (int i = 0; i < 3; i++) {
-      planeDim[i].x = input.getShort();
-      planeDim[i].y = input.getShort();
+    for (auto &i : planeDim) {
+      i.x = input.getShort();
+      i.y = input.getShort();
     }
     bits = 15;
   }
   if (image.format == 30 || image.format == 35) {
-    for (int i = 0; i < 3; i++)
-      pred[i] = input.getShort();
+    for (int &i : pred)
+      i = input.getShort();
 
     // Skip padding
     input.skipBytes(2);
@@ -235,8 +251,8 @@ void X3fDecoder::decompressSigma( X3fImage &image )
   } // End if format 30
 
   if (image.format == 6) {
-    for (int i = 0; i < 1024; i++) {
-      curve[i] = (short)input.getShort();
+    for (short &i : curve) {
+      i = (short)input.getShort();
     }
     max_len = 0;
 
@@ -290,15 +306,13 @@ void X3fDecoder::decompressSigma( X3fImage &image )
   ThrowRDE("X3fDecoder: Unable to find decoder for format: %d", image.format);
 }
 
-
-
-void X3fDecoder::createSigmaTable(ByteStream *bytes, int codes) {
+void X3fDecoder::createSigmaTable(ByteStream *bytes_, int codes) {
   memset(code_table, 0xff, sizeof(code_table));
 
   // Read codes and create 8 bit table with all valid values.
   for (int i = 0; i < codes; i++) {
-    uint32 len = bytes->getByte();
-    uint32 code = bytes->getByte();
+    uint32 len = bytes_->getByte();
+    uint32 code = bytes_->getByte();
     if (len > 8)
       ThrowRDE("X3fDecoder: bit length longer than 8");
     uint32 rem_bits = 8-len;
@@ -360,8 +374,8 @@ void X3fDecoder::decodeThreaded( RawDecoderThread* t )
     /* Initialize predictors */
     int pred_up[4];
     int pred_left[2];
-    for (int j = 0; j < 4; j++)
-      pred_up[j] = pred[i];
+    for (int &j : pred_up)
+      j = pred[i];
 
     for (int y = 0; y < dim.y; y++) {
       ushort16* dst = (ushort16*)mRaw->getData(0, y << subs) + i;
@@ -372,35 +386,36 @@ void X3fDecoder::decodeThreaded( RawDecoderThread* t )
       dst += 6<<subs;
       // We decode two pixels every loop
       for (int x = 2; x < dim.x; x += 2) {
-        int diff1 = SigmaDecode(&bits);
-        int diff2 = SigmaDecode(&bits);
+        diff1 = SigmaDecode(&bits);
+        diff2 = SigmaDecode(&bits);
         dst[0] = pred_left[0] = pred_left[0] + diff1;
         dst[3<<subs] = pred_left[1] = pred_left[1] + diff2;
         dst += 6<<subs;
       }
       // If plane is larger than image, skip that number of pixels.
-      for (int i = 0; i < skipX; i++)
+      for (int j = 0; j < skipX; j++)
         SigmaSkipOne(&bits);
     }
     return;
   }
 
   if (curr_image->format == 6) {
-    int pred[3];
+    // FIXME: or does it want X3fDecoder::pred[3] here?
+    int predictor[3];
     for (uint32 y = t->start_y; y < t->end_y; y++) {
       BitPumpMSB bits(mFile, line_offsets[y]);
-      ushort16* dst = (ushort16*)mRaw->getData(0,y);
-      pred[0] = pred[1] = pred[2] = 0;
+      auto *dst = (ushort16 *)mRaw->getData(0, y);
+      predictor[0] = predictor[1] = predictor[2] = 0;
       for (int x = 0; x < mRaw->dim.x; x++) {
-        for (int i = 0; i < 3; i++) {
+        for (int &i : predictor) {
           ushort16 val = huge_table[bits.peekBits(max_len)];
           uchar8 nbits = val&31;
           if (val == 0xffff) {
             ThrowRDE("SigmaDecompressor: Invalid Huffman value. Image Corrupt");
           }
           bits.skipBitsNoFill(nbits);
-          pred[i] += curve[(val>>5)];
-          dst[0] = clampbits(pred[i], 16);
+          i += curve[(val >> 5)];
+          dst[0] = clampbits(i, 16);
           dst++;
         }
       }
@@ -456,14 +471,14 @@ int X3fDecoder::SigmaDecode(BitPumpMSB *bits) {
 
 FileMap* X3fDecoder::getCompressedData()
 {
-  vector<X3fImage>::iterator img = mImages.begin();
+  auto img = mImages.begin();
   for (; img !=  mImages.end(); ++img) {
     X3fImage cimg = *img;
     if (cimg.type == 1 || cimg.type == 3) {
       return new FileMap(mFile->getSubView(cimg.dataOffset, cimg.dataSize));
     }
   }
-  return NULL;
+  return nullptr;
 }
 
 } // namespace RawSpeed

@@ -21,12 +21,15 @@
 
 #pragma once
 
-#include "decoders/RawDecoder.h"
-#include "tiff/TiffIFD.h"
-#include "io/BitPumpPlain.h"
-#include "parsers/TiffParser.h"
+#include "common/RawImage.h"     // for RawImage
+#include "decoders/RawDecoder.h" // for RawDecoder, RawDecoderThread (ptr o...
+#include "io/FileMap.h"          // for FileMap
 
 namespace RawSpeed {
+
+class CameraMetaData;
+
+class TiffIFD;
 
 class RafDecoder :
   public RawDecoder
@@ -34,12 +37,13 @@ class RafDecoder :
   TiffIFD *mRootIFD;
 public:
   RafDecoder(TiffIFD *rootIFD, FileMap* file);
-  virtual ~RafDecoder(void);
-  RawImage decodeRawInternal();
-  virtual void decodeMetaDataInternal(CameraMetaData *meta);
-  virtual void checkSupportInternal(CameraMetaData *meta);
+  ~RafDecoder() override;
+  RawImage decodeRawInternal() override;
+  void decodeMetaDataInternal(CameraMetaData *meta) override;
+  void checkSupportInternal(CameraMetaData *meta) override;
+
 protected:
-  virtual void decodeThreaded(RawDecoderThread* t);
+  void decodeThreaded(RawDecoderThread *t) override;
   void DecodeRaf();
   bool alt_layout;
 };

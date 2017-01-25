@@ -21,10 +21,11 @@
 
 #pragma once
 
-#include "io/IOException.h"
+#include "common/Common.h"
 #include "io/Buffer.h"
 #include "io/FileMap.h" // deprecated, see below
-#include "common/Common.h"
+#include "io/IOException.h"
+#include <cassert>
 
 namespace RawSpeed {
 
@@ -36,21 +37,25 @@ public:
   ByteStream() = default;
   ByteStream(const DataBuffer& buffer)
     : DataBuffer(buffer) {}
-  ByteStream(const Buffer& buffer, size_type offset, size_type size, bool inNativeByteOrder = true)
-    : DataBuffer(buffer.getSubView(0, offset+size), inNativeByteOrder), pos(offset) {}
-  ByteStream(const Buffer& buffer, size_type offset, bool inNativeByteOrder = true)
-    : DataBuffer(buffer, inNativeByteOrder), pos(offset) {}
+  ByteStream(const Buffer &buffer, size_type offset, size_type size_,
+             bool inNativeByteOrder_ = true)
+      : DataBuffer(buffer.getSubView(0, offset + size_), inNativeByteOrder_),
+        pos(offset) {}
+  ByteStream(const Buffer &buffer, size_type offset,
+             bool inNativeByteOrder_ = true)
+      : DataBuffer(buffer, inNativeByteOrder_), pos(offset) {}
 
   // deprecated:
-  ByteStream(const FileMap *f, size_type offset, size_type size, bool inNativeByteOrder = true)
-    : ByteStream(*f, offset, size, inNativeByteOrder) {}
-  ByteStream(const FileMap *f, size_type offset, bool inNativeByteOrder = true)
-    : ByteStream(*f, offset, inNativeByteOrder) {}
+  ByteStream(const FileMap *f, size_type offset, size_type size_,
+             bool inNativeByteOrder_ = true)
+      : ByteStream(*f, offset, size_, inNativeByteOrder_) {}
+  ByteStream(const FileMap *f, size_type offset, bool inNativeByteOrder_ = true)
+      : ByteStream(*f, offset, inNativeByteOrder_) {}
 
   // return ByteStream that starts at given offset
   // i.e. this->data + offset == getSubStream(offset).data
-  ByteStream getSubStream(size_type offset, size_type size) {
-    return ByteStream(getSubView(offset, size), 0, isInNativeByteOrder());
+  ByteStream getSubStream(size_type offset, size_type size_) {
+    return ByteStream(getSubView(offset, size_), 0, isInNativeByteOrder());
   }
 
   inline void check(size_type bytes) const {
@@ -70,9 +75,9 @@ public:
     pos += count;
     return ret;
   }
-  inline Buffer getBuffer(size_type size) {
-    Buffer ret = getSubView(pos, size);
-    pos += size;
+  inline Buffer getBuffer(size_type size_) {
+    Buffer ret = getSubView(pos, size_);
+    pos += size_;
     return ret;
   }
 
@@ -86,20 +91,21 @@ public:
     check(0);
   }
 
-  inline bool hasPatternAt(const char* pattern, size_type size, size_type relPos) const {
-    if (!isValid(pos+relPos, size))
+  inline bool hasPatternAt(const char *pattern, size_type size_,
+                           size_type relPos) const {
+    if (!isValid(pos + relPos, size_))
       return false;
-    return memcmp(&data[pos+relPos], pattern, size) == 0;
+    return memcmp(&data[pos + relPos], pattern, size_) == 0;
   }
 
-  inline bool hasPrefix(const char* prefix, size_type size) const {
-    return hasPatternAt(prefix, size, 0);
+  inline bool hasPrefix(const char *prefix, size_type size_) const {
+    return hasPatternAt(prefix, size_, 0);
   }
 
-  inline bool skipPrefix(const char* prefix, size_type size) {
-    bool has_prefix = hasPrefix(prefix, size);
+  inline bool skipPrefix(const char *prefix, size_type size_) {
+    bool has_prefix = hasPrefix(prefix, size_);
     if (has_prefix)
-      pos += size;
+      pos += size_;
     return has_prefix;
   }
 
@@ -113,7 +119,7 @@ public:
   }
 
   template<typename T> inline T get() {
-    T ret = peek<T>();
+    auto ret = peek<T>();
     pos += sizeof(T);
     return ret;
   }
@@ -149,7 +155,7 @@ public:
   // TODO: could add a lower bound check later if required.
   void rebase(size_type newPosition, size_type newSize) {
     const uchar8* dataAtNewPosition = getData(newSize);
-    if ((ptrdiff_t)newPosition > (ptrdiff_t)dataAtNewPosition)
+    if ((std::ptrdiff_t)newPosition > (std::ptrdiff_t)dataAtNewPosition)
       ThrowIOE("Out of bounds access in ByteStream");
     data = dataAtNewPosition - newPosition;
     size = newPosition + newSize;
@@ -159,7 +165,7 @@ public:
   // only necessary to create 'fake' TiffEntries (see e.g. RAF)
   static ByteStream createCopy(void* data, size_type size) {
     ByteStream bs;
-    uchar8* new_data = (uchar8*)_aligned_malloc(size, 8);
+    auto *new_data = (uchar8 *)_aligned_malloc(size, 8);
     memcpy(new_data, data, size);
     bs.data = new_data;
     bs.size = size;

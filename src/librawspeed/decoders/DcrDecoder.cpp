@@ -19,19 +19,31 @@
     Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
 */
 
-#include "common/StdAfx.h"
 #include "decoders/DcrDecoder.h"
+#include "common/Common.h"                // for uint32, ushort16, uchar8
+#include "common/Point.h"                 // for iPoint2D
+#include "decoders/RawDecoderException.h" // for ThrowRDE
+#include "io/ByteStream.h"                // for ByteStream
+#include "io/IOException.h"               // for IOException
+#include "tiff/TiffEntry.h"               // for TiffEntry, ::TIFF_SHORT
+#include "tiff/TiffIFD.h"                 // for TiffIFD, TiffRootIFD
+#include "tiff/TiffTag.h"                 // for ::MODEL, ::MAKE, ::CFAPATTERN
+#include <cstdio>                         // for NULL
+#include <string>                         // for string
+#include <vector>                         // for vector
+
+using namespace std;
 
 namespace RawSpeed {
+
+class CameraMetaData;
 
 DcrDecoder::DcrDecoder(TiffIFD *rootIFD, FileMap* file)  :
     RawDecoder(file), mRootIFD(rootIFD) {
   decoderVersion = 0;
 }
 
-DcrDecoder::~DcrDecoder(void) {
-  delete mRootIFD;
-}
+DcrDecoder::~DcrDecoder() { delete mRootIFD; }
 
 RawImage DcrDecoder::decodeRawInternal() {
   vector<TiffIFD*> data = mRootIFD->getIFDsWithTag(CFAPATTERN);
@@ -67,7 +79,7 @@ RawImage DcrDecoder::decodeRawInternal() {
       ThrowRDE("DCR Decoder: Couldn't find the linearization table");
     }
 
-    ushort16 *linearization_table = new ushort16[1024];
+    auto *linearization_table = new ushort16[1024];
     linearization->getShortArray(linearization_table, 1024);
 
     if (!uncorrectedRawValues)
@@ -94,7 +106,7 @@ RawImage DcrDecoder::decodeRawInternal() {
     if (uncorrectedRawValues) {
       mRaw->setTable(linearization_table, 1024, false);
     } else {
-      mRaw->setTable(NULL);
+      mRaw->setTable(nullptr);
     }
     delete [] linearization_table;
   } else
@@ -111,7 +123,7 @@ void DcrDecoder::decodeKodak65000(ByteStream &input, uint32 w, uint32 h) {
 
   uint32 random = 0;
   for (uint32 y = 0; y < h; y++) {
-    ushort16* dest = (ushort16*) & data[y*pitch];
+    auto *dest = (ushort16 *)&data[y * pitch];
     for (uint32 x = 0 ; x < w; x += 256) {
       pred[0] = pred[1] = 0;
       uint32 len = MIN(256, w-x);

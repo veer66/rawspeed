@@ -21,18 +21,23 @@
 
 #pragma once
 
-#include "decoders/RawDecoderException.h"
-#include "io/FileMap.h"
-#include "io/BitPumpJPEG.h" // Includes bytestream
-#include "common/RawImage.h"
-#include "io/BitPumpMSB.h"
-#include "io/BitPumpMSB16.h"
-#include "io/BitPumpMSB32.h"
-#include "io/BitPumpPlain.h"
-#include "metadata/CameraMetaData.h"
-#include "tiff/TiffIFD.h"
+#include "common/Common.h"    // for uint32, BitOrder
+#include "common/RawImage.h"  // for RawImage
+#include "common/Threading.h" // for pthread_t
+#include "io/FileMap.h"       // for FileMap
+#include <cstddef>            // for NULL
+#include <map>                // for map
+#include <string>             // for string
 
 namespace RawSpeed {
+
+class ByteStream;
+
+class CameraMetaData;
+
+class TiffIFD;
+
+class iPoint2D;
 
 class RawDecoder;
 
@@ -40,7 +45,10 @@ class RawDecoder;
 class RawDecoderThread
 {
   public:
-    RawDecoderThread() {error = 0; taskNo = -1;};
+    RawDecoderThread() {
+      error = nullptr;
+      taskNo = -1;
+    };
     uint32 start_y;
     uint32 end_y;
     const char* error;
@@ -58,7 +66,7 @@ public:
   /* The FileMap is not owned by this class, will not be deleted, and must remain */
   /* valid while this object exists */
   RawDecoder(FileMap* file);
-  virtual ~RawDecoder() {}
+  virtual ~RawDecoder() = default;
 
   /* Check if the decoder can decode the image from this camera */
   /* A RawDecoderException will be thrown if the camera isn't supported */
@@ -86,7 +94,7 @@ public:
 
   /* Allows access to the root IFD structure */
   /* If image isn't TIFF based NULL will be returned */
-  virtual TiffIFD* getRootIFD() {return NULL;}
+  virtual TiffIFD *getRootIFD() { return nullptr; }
 
   /* The decoded image - undefined if image has not or could not be decoded. */
   /* Remember this is automatically refcounted, so a reference is retained until this class is destroyed */
@@ -121,7 +129,7 @@ public:
 
   /* Retrieve the main RAW chunk */
   /* Returns NULL if unknown */
-  virtual FileMap* getCompressedData() {return NULL;}
+  virtual FileMap *getCompressedData() { return nullptr; }
 
 protected:
   /* Attempt to decode the image */
@@ -147,13 +155,13 @@ protected:
   /* Check the camera and mode against the camera database. */
   /* A RawDecoderException will be thrown if the camera isn't supported */
   /* Unknown cameras does NOT generate any errors, but returns false */
-  bool checkCameraSupported(CameraMetaData *meta, string make, string model,
-                            const string &mode);
+  bool checkCameraSupported(CameraMetaData *meta, std::string make, std::string model,
+                            const std::string &mode);
 
   /* Helper function for decodeMetaData(), that find the camera in the CameraMetaData DB */
   /* and sets common settings such as crop, black- white level, and sets CFA information */
-  virtual void setMetaData(CameraMetaData *meta, string make, string model,
-                           const string &mode, int iso_speed = 0);
+  virtual void setMetaData(CameraMetaData *meta, std::string make, std::string model,
+                           const std::string &mode, int iso_speed = 0);
 
   /* Helper function for decoders, that will unpack uncompressed image data */
   /* input: Input image, positioned at first pixel */
@@ -215,13 +223,13 @@ protected:
   int decoderVersion;
 
   /* Hints set for the camera after checkCameraSupported has been called from the implementation*/
-   map<string,string> hints;
+   std::map<std::string,std::string> hints;
 };
 
 class RawSlice {
 public:
   RawSlice() { h = offset = count = 0;};
-  ~RawSlice() {};
+  ~RawSlice() = default;
   uint32 h;
   uint32 offset;
   uint32 count;

@@ -20,34 +20,41 @@
 
 #pragma once
 
-#include "decoders/RawDecoder.h"
-#include "decompressors/LJpegPlain.h"
-#include "tiff/TiffIFD.h"
-#include "io/BitPumpPlain.h"
+#include "common/Common.h"       // for uchar8, int32
+#include "common/RawImage.h"     // for RawImage
+#include "decoders/RawDecoder.h" // for RawDecoder
+#include "io/BitPumpMSB.h"       // for BitPumpMSB
+#include "io/FileMap.h"          // for FileMap
+#include <string>                // for string
 
 namespace RawSpeed {
+
+class CameraMetaData;
+
+class TiffIFD;
 
 class SrwDecoder :
   public RawDecoder
 {
 public:
   SrwDecoder(TiffIFD *rootIFD, FileMap* file);
-  virtual ~SrwDecoder(void);
-  virtual RawImage decodeRawInternal();
-  virtual void decodeMetaDataInternal(CameraMetaData *meta);
-  virtual void checkSupportInternal(CameraMetaData *meta);
-  virtual TiffIFD* getRootIFD() {return mRootIFD;}
+  ~SrwDecoder() override;
+  RawImage decodeRawInternal() override;
+  void decodeMetaDataInternal(CameraMetaData *meta) override;
+  void checkSupportInternal(CameraMetaData *meta) override;
+  TiffIFD *getRootIFD() override { return mRootIFD; }
+
 private:
-  typedef struct {
+  struct encTableItem {
     uchar8 encLen;
     uchar8 diffLen;
-  } encTableItem;
+  };
 
   void decodeCompressed(TiffIFD* raw);
   void decodeCompressed2(TiffIFD* raw, int bits);
   int32 samsungDiff (BitPumpMSB &pump, encTableItem *tbl);
   void decodeCompressed3(TiffIFD* raw, int bits);
-  string getMode();
+  std::string getMode();
   TiffIFD *mRootIFD;
 };
 

@@ -21,24 +21,25 @@
 
 #pragma once
 
-#include "decoders/RawDecoder.h"
+#include "common/Common.h"       // for uint32
+#include "common/RawImage.h"     // for RawImage
+#include "decoders/RawDecoder.h" // for RawDecoder
+#include "io/FileMap.h"          // for FileMap
 
 namespace RawSpeed {
 
-typedef struct {
-  const char* code;
-  const char* name;
-} mrw_camera_t;
+class CameraMetaData;
+class TiffIFD;
 
 class MrwDecoder :
   public RawDecoder
 {
 public:
   MrwDecoder(FileMap* file);
-  virtual ~MrwDecoder(void);
-  virtual RawImage decodeRawInternal();
-  virtual void checkSupportInternal(CameraMetaData *meta);
-  virtual void decodeMetaDataInternal(CameraMetaData *meta);
+  ~MrwDecoder() override;
+  RawImage decodeRawInternal() override;
+  void checkSupportInternal(CameraMetaData *meta) override;
+  void decodeMetaDataInternal(CameraMetaData *meta) override;
   static int isMRW(FileMap* input);
 protected:
   virtual void parseHeader();

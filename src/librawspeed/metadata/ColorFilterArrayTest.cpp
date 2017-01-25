@@ -19,16 +19,17 @@
     Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
 */
 
-#include "metadata/ColorFilterArray.h" // for ColorFilterArray
-#include "common/Point.h"            // for ColorFilterArray
-#include <gmock/gmock.h> // for IsNullLiteralHelper, AssertionResult, gtest_ar
-#include <gtest/gtest.h> // for IsNullLiteralHelper, AssertionResult, gtest_ar
-#include <memory>        // for unique_ptr
+#include "common/Common.h"             // for uint32
+#include "common/Point.h"              // for iPoint2D
+#include "metadata/ColorFilterArray.h" // for ColorFilterArray, (anonymous)
+#include <gtest/gtest.h>               // for AssertionResult, IsNullLitera...
+#include <memory>                      // for unique_ptr
+#include <string>                      // for string
 
 using namespace std;
 using namespace RawSpeed;
 
-typedef std::tr1::tuple<int, int, int, int> Bayer2x2;
+using Bayer2x2 = std::tr1::tuple<int, int, int, int>;
 
 static const iPoint2D square(2, 2);
 
@@ -89,7 +90,7 @@ TEST(ColorFilterArrayTestBasic, ToDcraw) {
 
 class ColorFilterArrayTest : public ::testing::TestWithParam<Bayer2x2> {
 protected:
-  ColorFilterArrayTest() {}
+  ColorFilterArrayTest() = default;
   virtual void SetUp() { param = GetParam(); }
 
   Bayer2x2 param;

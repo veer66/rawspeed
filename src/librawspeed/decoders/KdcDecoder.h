@@ -21,19 +21,25 @@
 
 #pragma once
 
-#include "decoders/RawDecoder.h"
+#include "common/RawImage.h"     // for RawImage
+#include "decoders/RawDecoder.h" // for RawDecoder
+#include "io/FileMap.h"          // for FileMap
 
 namespace RawSpeed {
+
+class CameraMetaData;
+class TiffIFD;
 
 class KdcDecoder :
   public RawDecoder
 {
 public:
   KdcDecoder(TiffIFD *rootIFD, FileMap* file);
-  virtual ~KdcDecoder(void);
-  virtual RawImage decodeRawInternal();
-  virtual void checkSupportInternal(CameraMetaData *meta);
-  virtual void decodeMetaDataInternal(CameraMetaData *meta);
+  ~KdcDecoder() override;
+  RawImage decodeRawInternal() override;
+  void checkSupportInternal(CameraMetaData *meta) override;
+  void decodeMetaDataInternal(CameraMetaData *meta) override;
+
 protected:
   TiffIFD *mRootIFD;
 };

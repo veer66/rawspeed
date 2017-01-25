@@ -19,14 +19,20 @@
     Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
 */
 
-#include "common/StdAfx.h"
 #include "tiff/CiffEntry.h"
-#include <math.h>
+#include "common/Common.h"               // for uchar8, uint32, get4LE, ush...
+#include "parsers/CiffParserException.h" // for ThrowCPE
+#include <cstdio>                        // for sprintf, NULL
+#include <cstring>                       // for memcpy, strlen
+#include <string>                        // for string, allocator
+#include <vector>                        // for vector
+
+using namespace std;
 
 namespace RawSpeed {
 
 CiffEntry::CiffEntry(FileMap* f, uint32 value_data, uint32 offset) {
-  own_data = NULL;
+  own_data = nullptr;
   ushort16 p = get2LE(f->getData(offset, 2), 0);
   tag = (CiffTag) (p & 0x3fff);
   ushort16 datalocation = (p & 0xc000);
@@ -46,7 +52,7 @@ CiffEntry::CiffEntry(FileMap* f, uint32 value_data, uint32 offset) {
   count = bytesize >> getElementShift();
 }
 
-CiffEntry::~CiffEntry(void) {
+CiffEntry::~CiffEntry() {
   if (own_data)
     delete[] own_data;
 }
@@ -144,7 +150,7 @@ vector<string> CiffEntry::getStrings() {
   uint32 start = 0;
   for (uint32 i=0; i< count; i++) {
     if (own_data[i] == 0) {
-      strs.push_back(string((const char*)&own_data[start]));
+      strs.emplace_back((const char *)&own_data[start]);
       start = i+1;
     }
   }
@@ -181,10 +187,10 @@ uchar8* CiffEntry::getDataWrt()
 #endif
 
 std::string CiffEntry::getValueAsString()
-{  
+{
   if (type == CIFF_ASCII)
     return string((const char*)&data[0]);
-  char *temp_string = new char[4096];
+  auto *temp_string = new char[4096];
   if (count == 1) {
     switch (type) {
       case CIFF_LONG:

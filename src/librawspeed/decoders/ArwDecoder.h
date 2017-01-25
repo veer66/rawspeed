@@ -21,24 +21,29 @@
 
 #pragma once
 
-#include "decoders/RawDecoder.h"
-#include "decompressors/LJpegPlain.h"
-#include "tiff/TiffIFD.h"
-#include "io/BitPumpPlain.h"
+#include "common/Common.h"       // for uint32
+#include "common/RawImage.h"     // for RawImage
+#include "decoders/RawDecoder.h" // for RawDecoder, RawDecoderThread (ptr o...
+#include "io/FileMap.h"          // for FileMap
 
 namespace RawSpeed {
+
+class ByteStream;
+class CameraMetaData;
+class TiffIFD;
 
 class ArwDecoder :
   public RawDecoder
 {
 public:
   ArwDecoder(TiffIFD *rootIFD, FileMap* file);
-  virtual ~ArwDecoder(void);
-  virtual RawImage decodeRawInternal();
-  virtual void checkSupportInternal(CameraMetaData *meta);
-  virtual void decodeMetaDataInternal(CameraMetaData *meta);
-  virtual void decodeThreaded(RawDecoderThread* t);
-  virtual TiffIFD* getRootIFD() {return mRootIFD;}
+  ~ArwDecoder() override;
+  RawImage decodeRawInternal() override;
+  void checkSupportInternal(CameraMetaData *meta) override;
+  void decodeMetaDataInternal(CameraMetaData *meta) override;
+  void decodeThreaded(RawDecoderThread *t) override;
+  TiffIFD *getRootIFD() override { return mRootIFD; }
+
 protected:
   void DecodeARW(ByteStream &input, uint32 w, uint32 h);
   void DecodeARW2(ByteStream &input, uint32 w, uint32 h, uint32 bpp);

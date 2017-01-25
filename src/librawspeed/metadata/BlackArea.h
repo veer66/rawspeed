@@ -20,7 +20,7 @@
 
 #pragma once
 
-#include "common/StdAfx.h"
+#include "common/Common.h" // for uint32
 
 namespace RawSpeed {
 
@@ -28,7 +28,7 @@ class BlackArea
 {
 public:
   BlackArea(int offset, int size, bool isVertical);
-  virtual ~BlackArea(void);
+  virtual ~BlackArea();
   uint32 offset; // Offset in bayer pixels.
   uint32 size;   // Size in bayer pixels.
   bool isVertical;  // Otherwise horizontal

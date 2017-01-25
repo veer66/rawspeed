@@ -20,11 +20,13 @@
 
 #pragma once
 
-#include "decoders/RawDecoderException.h"
+#include "common/Common.h" // for uint32
+#include "common/Point.h"  // for iPoint2D
+#include <string>          // for string
 
 namespace RawSpeed {
 
-typedef enum {
+enum CFAColor {
   CFA_COLOR_MIN = 0,
   CFA_RED = 0,
   CFA_GREEN = 1,
@@ -37,8 +39,7 @@ typedef enum {
   CFA_COLOR_MAX = 8,
   CFA_FUJI_GREEN = 9,
   CFA_UNKNOWN = 255
-} CFAColor;
-
+};
 
 class ColorFilterArray
 {
@@ -48,7 +49,7 @@ public:
   ColorFilterArray& operator= (const ColorFilterArray& other);
   ColorFilterArray(const iPoint2D &size);
   ColorFilterArray(const uint32 dcrawFilters);
-  virtual ~ColorFilterArray(void);
+  virtual ~ColorFilterArray();
 
   virtual void setSize(const iPoint2D &size);
   void setColorAt(iPoint2D pos, CFAColor c);

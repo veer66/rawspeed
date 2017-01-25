@@ -18,15 +18,25 @@ License along with this library; if not, write to the Free Software
 Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
 */
 
-#include "common/StdAfx.h"
 #include "parsers/X3fParser.h"
-#include "decoders/X3fDecoder.h"
+#include "common/Common.h"                // for uint32, uchar8, getHostEnd...
+#include "decoders/RawDecoderException.h" // for ThrowRDE, RawDecoderException
+#include "decoders/X3fDecoder.h"          // for X3fDecoder
+#include "io/ByteStream.h"                // for ByteStream
+#include "io/IOException.h"               // for IOException
+#include <cstdio>                         // for NULL
+#include <cstring>                        // for memset
+#include <map>                            // for allocator, map, map<>::map...
+#include <string>                         // for string, basic_string, oper...
+#include <vector>                         // for vector
+
+using namespace std;
 
 namespace RawSpeed {
 
 X3fParser::X3fParser(FileMap* file) {
-  decoder = NULL;
-  bytes = NULL;
+  decoder = nullptr;
+  bytes = nullptr;
   mFile = file;
   uint32 size = file->getSize();
   if (size<104+128)
@@ -64,15 +74,11 @@ void X3fParser::freeObjects() {
     delete bytes;
   if (decoder)
     delete decoder;
-  decoder = NULL;
-  bytes = NULL;
+  decoder = nullptr;
+  bytes = nullptr;
 }
 
-X3fParser::~X3fParser(void)
-{
-  freeObjects();
-}
-
+X3fParser::~X3fParser() { freeObjects(); }
 
 static string getIdAsString(ByteStream *bytes) {
   uchar8 id[5];
@@ -103,7 +109,7 @@ void X3fParser::readDirectory()
     decoder->mDirectory.push_back(dir);
     uint32 old_pos = bytes->getPosition();
     if ("IMA2" == dir.id || "IMAG" == dir.id) {
-      decoder->mImages.push_back(X3fImage(bytes, dir.offset, dir.length));
+      decoder->mImages.emplace_back(bytes, dir.offset, dir.length);
     }
     if ("PROP" == dir.id) {
       decoder->mProperties.addProperties(bytes, dir.offset, dir.length);
@@ -114,10 +120,10 @@ void X3fParser::readDirectory()
 
 RawDecoder* X3fParser::getDecoder()
 {
-  if (NULL == decoder)
+  if (nullptr == decoder)
     ThrowRDE("X3fParser: No decoder found!");
   RawDecoder *ret = decoder;
-  decoder = NULL;
+  decoder = nullptr;
   return ret;
 }
 
@@ -160,9 +166,9 @@ X3fImage::X3fImage( ByteStream *bytes, uint32 offset, uint32 length )
 * ConvertUTF16toUTF8 function only Copyright:
 *
 * Copyright 2001-2004 Unicode, Inc.
-* 
+*
 * Disclaimer
-* 
+*
 * This source code is provided as is by Unicode, Inc. No claims are
 * made as to fitness for any particular purpose. No warranties of any
 * kind are expressed or implied. The recipient agrees to determine
@@ -170,9 +176,9 @@ X3fImage::X3fImage( ByteStream *bytes, uint32 offset, uint32 length )
 * purchased on magnetic or optical media from Unicode, Inc., the
 * sole remedy for any claim will be exchange of defective media
 * within 90 days of receipt.
-* 
+*
 * Limitations on Rights to Redistribute This Code
-* 
+*
 * Unicode, Inc. hereby grants the right to freely use the information
 * supplied in this file in the creation of products supporting the
 * Unicode Standard, and to make copies of this file in any form
@@ -180,11 +186,10 @@ X3fImage::X3fImage( ByteStream *bytes, uint32 offset, uint32 length )
 * remains attached.
 */
 
-typedef unsigned int    UTF32;  /* at least 32 bits */
-typedef unsigned short  UTF16;  /* at least 16 bits */
-typedef unsigned char   UTF8;   /* typically 8 bits */
-typedef unsigned char   Boolean; /* 0 or 1 */
-
+using UTF32 = unsigned int;    /* at least 32 bits */
+using UTF16 = unsigned short;  /* at least 16 bits */
+using UTF8 = unsigned char;    /* typically 8 bits */
+using Boolean = unsigned char; /* 0 or 1 */
 
 /* Some fundamental constants */
 #define UNI_REPLACEMENT_CHAR (UTF32)0x0000FFFD
@@ -207,16 +212,16 @@ static const int halfShift  = 10; /* used for shifting by 10 bits */
 static const UTF32 halfBase = 0x0010000UL;
 static const UTF8 firstByteMark[7] = { 0x00, 0x00, 0xC0, 0xE0, 0xF0, 0xF8, 0xFC };
 
-static bool ConvertUTF16toUTF8 (const UTF16** sourceStart, const UTF16* sourceEnd,  UTF8** targetStart, UTF8* targetEnd) 
+static bool ConvertUTF16toUTF8 (const UTF16** sourceStart, const UTF16* sourceEnd,  UTF8** targetStart, UTF8* targetEnd)
 {
-  bool success = TRUE;
+  bool success = true;
   const UTF16* source = *sourceStart;
   UTF8* target = *targetStart;
   while (source < sourceEnd) {
     UTF32 ch;
     unsigned short bytesToWrite = 0;
     const UTF32 byteMask = 0xBF;
-    const UTF32 byteMark = 0x80; 
+    const UTF32 byteMark = 0x80;
     const UTF16* oldSource = source; /* In case we have to back up because of target overflow. */
     ch = *source++;
     /* If we have a surrogate pair, convert to UTF32 first. */
@@ -232,13 +237,13 @@ static bool ConvertUTF16toUTF8 (const UTF16** sourceStart, const UTF16* sourceEn
 #if 0
         } else if (flags == strictConversion) { /* it's an unpaired high surrogate */
           --source; /* return to the illegal value itself */
-          success = FALSE;
+          success = false;
           break;
 #endif
         }
       } else { /* We don't have the 16 bits following the high surrogate. */
         --source; /* return to the high surrogate */
-        success = FALSE;
+        success = false;
         break;
       }
     }
@@ -254,7 +259,9 @@ static bool ConvertUTF16toUTF8 (const UTF16** sourceStart, const UTF16* sourceEn
     target += bytesToWrite;
     if (target > targetEnd) {
       source = oldSource; /* Back up source pointer! */
-      target -= bytesToWrite; success = FALSE; break;
+      target -= bytesToWrite;
+      success = false;
+      break;
     }
     switch (bytesToWrite) { /* note: everything falls through. */
             case 4: *--target = (UTF8)((ch | byteMark) & byteMask); ch >>= 6;
@@ -272,7 +279,7 @@ static bool ConvertUTF16toUTF8 (const UTF16** sourceStart, const UTF16* sourceEn
 
 string X3fPropertyCollection::getString( ByteStream *bytes ) {
   uint32 max_len = bytes->getRemainSize() / 2;
-  const UTF16* start = (const UTF16*)bytes->getData(max_len*2);
+  const auto *start = (const UTF16 *)bytes->getData(max_len * 2);
   const UTF16* src_end = start;
   uint32 i = 0;
   for (; i < max_len && start == src_end; i++) {
@@ -281,7 +288,7 @@ string X3fPropertyCollection::getString( ByteStream *bytes ) {
     }
   }
   if (start != src_end) {
-    UTF8 *dest = new UTF8[i * 4UL + 1];
+    auto *dest = new UTF8[i * 4UL + 1];
     memset(dest, 0, i * 4UL + 1);
     if (ConvertUTF16toUTF8(&start, src_end, &dest, &dest[i * 4 - 1])) {
       string ret((const char*)dest);

@@ -80,7 +80,7 @@ struct BitStreamCacheRightInLeftOut : BitStreamCacheBase
 template<typename Tag, typename Cache>
 class BitStream
 {
-  typedef ByteStream::size_type size_type;
+  using size_type = ByteStream::size_type;
   const uchar8* data = nullptr;
   const size_type size = 0;
   size_type pos = 0; // Offset/position inside data buffer in bytes
@@ -94,8 +94,8 @@ public:
     : data(s.peekData(s.getRemainSize())), size(s.getRemainSize() + FILEMAP_MARGIN) {}
 
   // deprecated:
-  BitStream(FileMap* f, size_type offset, size_type size)
-    : data(f->getData(offset, size)), size(size + FILEMAP_MARGIN) {}
+  BitStream(FileMap *f, size_type offset, size_type size_)
+      : data(f->getData(offset, size_)), size(size_ + FILEMAP_MARGIN) {}
   BitStream(FileMap* f, size_type offset)
     : BitStream(f, offset, f->getSize()-offset) {}
 

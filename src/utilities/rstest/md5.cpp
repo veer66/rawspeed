@@ -27,13 +27,12 @@
  *   Software.
  */
 
-#include <stdbool.h>
-#include <stddef.h>
-#include <stdint.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <time.h>
+#include <cstddef>
+#include <cstdint>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <ctime>
 
 #include <string>
 
@@ -188,14 +187,14 @@ std::string md5_hash(const uint8_t *message, size_t len) {
   uint32_t hash[4];
   md5_hash(message, len, hash);
   char res[2 * sizeof(hash) + 1];
-  uint8_t *h = (uint8_t *)hash;
+  auto *h = (uint8_t *)hash;
   for (int i = 0; i < (int)sizeof(hash); ++i)
     snprintf(res + 2 * i, 3, "%02x", h[i]);
   res[32] = 0;
   return res;
 }
 
-#if 0
+#ifdef ENABLE_SELFTEST
 /* Self-check */
 
 struct testcase {
@@ -204,7 +203,7 @@ struct testcase {
 };
 
 #define TESTCASE(a, b, c, d, msg)                                              \
-  { {UINT32_C(a), UINT32_C(b), UINT32_C(c), UINT32_C(d)}, (const uint8_t *)msg }
+  { {UINT32_C(a), UINT32_C(b), UINT32_C(c), UINT32_C(d)}, (const uint8_t *)(msg) }
 
 // Note: The MD5 standard specifies that uint32 are serialized to/from bytes in little endian
 static struct testcase testCases[] = {
@@ -217,7 +216,7 @@ static struct testcase testCases[] = {
 	TESTCASE(0xA2F4ED57,0x55C9E32B,0x2EDA49AC,0x7AB60721, "12345678901234567890123456789012345678901234567890123456789012345678901234567890"),
 };
 
-static bool self_check(void) {
+static bool self_check() {
 	unsigned int i;
 	for (i = 0; i < sizeof(testCases) / sizeof(testCases[i]); i++) {
 		struct testcase *tc = &testCases[i];
@@ -239,6 +238,7 @@ int main(int argc, char **argv) {
 	}
 	printf("Self-check passed\n");
 
+#if 0
 	// Benchmark speed
 	uint32_t state[4] = {0};
 	uint8_t block[64] = {0};
@@ -248,6 +248,7 @@ int main(int argc, char **argv) {
 	for (i = 0; i < N; i++)
 		md5_compress(state, block);
 	printf("Speed: %.1f MB/s\n", (double)N * sizeof(block) / (clock() - start_time) * CLOCKS_PER_SEC / 1000000);
+#endif
 
 	return EXIT_SUCCESS;
 }

@@ -20,23 +20,27 @@
 
 #pragma once
 
-#include "decompressors/LJpegPlain.h"
-#include "tiff/TiffIFD.h"
-#include "decoders/DngDecoderSlices.h"
-#include "common/DngOpcodes.h"
+#include "common/Common.h"       // for uint32
+#include "common/RawImage.h"     // for RawImage
+#include "decoders/RawDecoder.h" // for RawDecoder
+#include "io/FileMap.h"          // for FileMap
 
 namespace RawSpeed {
+
+class CameraMetaData;
+class TiffIFD;
 
 class DngDecoder :
   public RawDecoder
 {
 public:
   DngDecoder(TiffIFD *rootIFD, FileMap* file);
-  virtual ~DngDecoder(void);
-  virtual RawImage decodeRawInternal();
-  virtual void decodeMetaDataInternal(CameraMetaData *meta);
-  virtual void checkSupportInternal(CameraMetaData *meta);
-  virtual TiffIFD* getRootIFD() {return mRootIFD;}
+  ~DngDecoder() override;
+  RawImage decodeRawInternal() override;
+  void decodeMetaDataInternal(CameraMetaData *meta) override;
+  void checkSupportInternal(CameraMetaData *meta) override;
+  TiffIFD *getRootIFD() override { return mRootIFD; }
+
 protected:
   TiffIFD *mRootIFD;
   bool mFixLjpeg;
@@ -49,7 +53,7 @@ protected:
 class DngStrip {
 public:
   DngStrip() { h = offset = count = offsetY = 0;};
-  ~DngStrip() {};
+  ~DngStrip() = default;
   uint32 h;
   uint32 offset; // Offset in bytes
   uint32 count;

@@ -18,8 +18,16 @@ License along with this library; if not, write to the Free Software
 Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
 */
 
-#include "common/StdAfx.h"
 #include "decoders/AriDecoder.h"
+#include "common/Common.h"                // for uint32, ushort16, getHostE...
+#include "common/Point.h"                 // for iPoint2D
+#include "decoders/RawDecoderException.h" // for ThrowRDE
+#include "io/BitPumpMSB32.h"              // for BitPumpMSB32
+#include "io/ByteStream.h"                // for ByteStream
+#include "io/IOException.h"               // for IOException
+#include "metadata/CameraMetaData.h"      // for CameraMetaData
+#include "metadata/ColorFilterArray.h"    // for ::CFA_BLUE, ::CFA_GREEN
+#include <string>                         // for string
 
 namespace RawSpeed {
 
@@ -59,8 +67,7 @@ AriDecoder::AriDecoder(FileMap* file) : RawDecoder(file) {
   }
 }
 
-AriDecoder::~AriDecoder(void) {
-}
+AriDecoder::~AriDecoder() = default;
 
 RawImage AriDecoder::decodeRawInternal() {
   mRaw->dim = iPoint2D(mWidth, mHeight);
@@ -78,7 +85,7 @@ void AriDecoder::decodeThreaded(RawDecoderThread * t) {
 
   uint32 hw = mWidth >> 1;
   for (uint32 y = t->start_y; y < t->end_y; y++) {
-    ushort16* dest = (ushort16*)mRaw->getData(0, y);
+    auto *dest = (ushort16 *)mRaw->getData(0, y);
     for (uint32 x = 0 ; x < hw; x++) {
       uint32 a = bits.getBits(12);
       uint32 b = bits.getBits(12);

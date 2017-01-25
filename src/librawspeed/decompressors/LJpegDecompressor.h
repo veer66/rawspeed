@@ -21,8 +21,14 @@
 
 #pragma once
 
-#include "decompressors/HuffmanTable.h"
-#include "decoders/RawDecoder.h"
+#include "common/Common.h"              // for uint32
+#include "common/RawImage.h"            // for RawImage
+#include "decompressors/HuffmanTable.h" // IWYU pragma: keep
+#include "io/FileMap.h"                 // for FileMap
+#include <array>                        // for array
+#include <memory>                       // for unique_ptr
+#include <utility>                      // for move
+#include <vector>                       // for vector
 
 /*
  * The following enum and two structs are stolen from the IJG JPEG library
@@ -31,7 +37,9 @@
 
 namespace RawSpeed {
 
-typedef enum {		/* JPEG marker codes			*/
+class ByteStream;
+
+enum JpegMarker { /* JPEG marker codes			*/
   M_STUFF = 0x00,
   M_SOF0  = 0xc0,	/* baseline DCT				*/
   M_SOF1  = 0xc1,	/* extended sequential DCT		*/
@@ -97,13 +105,13 @@ typedef enum {		/* JPEG marker codes			*/
   M_TEM   = 0x01,	/* temporary use			*/
   M_FILL  = 0xFF
 
-} JpegMarker;
 
+};
 
 /*
 * The following structure stores basic information about one component.
 */
-typedef struct JpegComponentInfo {
+struct JpegComponentInfo {
   /*
   * These values are fixed over the whole image.
   * They are read from the SOF marker.
@@ -117,7 +125,7 @@ typedef struct JpegComponentInfo {
   uint32 dcTblNo = -1;
   uint32 superH = -1; // Horizontal Supersampling
   uint32 superV = -1; // Vertical Supersampling
-} JpegComponentInfo;
+};
 
 class SOFInfo {
 public:
@@ -132,11 +140,14 @@ public:
 class LJpegDecompressor
 {
 public:
-  LJpegDecompressor(FileMap* file, RawImage img) : mFile(file), mRaw(img) {}
+  LJpegDecompressor(FileMap *file, const RawImage &img)
+      : mFile(file), mRaw(img) {}
   virtual ~LJpegDecompressor();
   void decode(uint32 offset, uint32 size, uint32 offsetX, uint32 offsetY);
   void getSOF(SOFInfo* i, uint32 offset, uint32 size);
-  void addSlices(vector<int> slices) {slicesW = slices;}  // CR2 slices.
+  void addSlices(std::vector<int> slices) {
+    slicesW = std::move(slices);
+  } // CR2 slices.
 
   bool mDNGCompatible = false;  // DNG v1.0.x compatibility
   bool mFullDecodeHT = true;    // FullDecode Huffman
@@ -152,18 +163,18 @@ protected:
 
   virtual void decodeScan() = 0;
 
-  ByteStream* input = 0;
-  FileMap *mFile = 0;
+  ByteStream *input = nullptr;
+  FileMap *mFile = nullptr;
   RawImage mRaw;
 
   SOFInfo frame;
-  vector<int> slicesW;
+  std::vector<int> slicesW;
   uint32 pred = 0;
   uint32 Pt = 0;
   uint32 offX = 0, offY = 0;  // Offset into image where decoding should start
   uint32 skipX = 0, skipY = 0;   // Tile is larger than output, skip these border pixels
-  array<HuffmanTable*, 4> huff {}; // 4 pointers into the store
-  vector<unique_ptr<HuffmanTable>> huffmanTableStore; // vector of unique HTs
+  std::array<HuffmanTable*, 4> huff {}; // 4 pointers into the store
+  std::vector<std::unique_ptr<HuffmanTable>> huffmanTableStore; // std::vector of unique HTs
 };
 
 } // namespace RawSpeed

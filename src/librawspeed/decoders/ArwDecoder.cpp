@@ -19,8 +19,25 @@
     Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
 */
 
-#include "common/StdAfx.h"
 #include "decoders/ArwDecoder.h"
+#include "common/Common.h"                // for uint32, ushort16, uchar8
+#include "common/Point.h"                 // for iPoint2D
+#include "decoders/RawDecoderException.h" // for ThrowRDE
+#include "io/BitPumpMSB.h"                // for BitPumpMSB
+#include "io/BitPumpPlain.h"              // for BitPumpPlain, BitStream<>:...
+#include "io/ByteStream.h"                // for ByteStream
+#include "io/IOException.h"               // for IOException
+#include "metadata/ColorFilterArray.h"    // for ::CFA_BLUE, ::CFA_GREEN
+#include "tiff/TiffEntry.h"               // for TiffEntry
+#include "tiff/TiffIFD.h"                 // for TiffIFD, TiffRootIFD
+#include "tiff/TiffTag.h"                 // for ::MAKE, ::MODEL, ::DNGPRIV...
+#include <cstdio>                         // for NULL
+#include <exception>                      // for exception
+#include <map>                            // for map, _Rb_tree_iterator
+#include <string>                         // for string, operator==, basic_...
+#include <vector>                         // for vector
+
+using namespace std;
 
 namespace RawSpeed {
 
@@ -30,14 +47,14 @@ ArwDecoder::ArwDecoder(TiffIFD *rootIFD, FileMap* file) :
   decoderVersion = 1;
 }
 
-ArwDecoder::~ArwDecoder(void) {
+ArwDecoder::~ArwDecoder() {
   if (mRootIFD)
     delete mRootIFD;
-  mRootIFD = NULL;
+  mRootIFD = nullptr;
 }
 
 RawImage ArwDecoder::decodeRawInternal() {
-  TiffIFD* raw = NULL;
+  TiffIFD *raw = nullptr;
   vector<TiffIFD*> data = mRootIFD->getIFDsWithTag(STRIPOFFSETS);
 
   if (data.empty()) {
@@ -83,10 +100,10 @@ RawImage ArwDecoder::decodeRawInternal() {
       uint32 head_off = 164600;
 
       // Replicate the dcraw contortions to get the "decryption" key
-      const uchar8 *data = mFile->getData(key_off, 1);
-      uint32 offset = (*data)*4;
-      data = mFile->getData(key_off+offset, 4);
-      uint32 key = get4BE(data,0);
+      const uchar8 *keyData = mFile->getData(key_off, 1);
+      uint32 offset = (*keyData) * 4;
+      keyData = mFile->getData(key_off + offset, 4);
+      uint32 key = get4BE(keyData, 0);
       uchar8 *head = mFile->getDataWrt(head_off, 40);
       SonyDecrypt((uint32 *) head, 10, key);
       for (int i=26; i-- > 22; )
@@ -142,8 +159,8 @@ RawImage ArwDecoder::decodeRawInternal() {
   // to detect it this way in the future.
   data = mRootIFD->getIFDsWithTag(MAKE);
   if (data.size() > 1) {
-    for (uint32 i = 0; i < data.size(); i++) {
-      string make = data[i]->getEntry(MAKE)->getString();
+    for (auto &i : data) {
+      string make = i->getEntry(MAKE)->getString();
       /* Check for maker "SONY" without spaces */
       if (make == "SONY")
         bitPerPixel = 8;
@@ -157,7 +174,7 @@ RawImage ArwDecoder::decodeRawInternal() {
   mRaw->dim = iPoint2D(width, height);
   mRaw->createData();
 
-  ushort16 *curve = new ushort16[0x4001];
+  auto *curve = new ushort16[0x4001];
   TiffEntry *c = raw->getEntry(SONY_CURVE);
   uint32 sony_curve[] = { 0, 0, 0, 0, 0, 4095 };
 
@@ -199,7 +216,7 @@ RawImage ArwDecoder::decodeRawInternal() {
   if (uncorrectedRawValues) {
     mRaw->setTable(curve, 0x4000, false);
   } else {
-    mRaw->setTable(NULL);
+    mRaw->setTable(nullptr);
   }
 
   delete[] curve;
@@ -226,7 +243,7 @@ void ArwDecoder::DecodeUncompressed(TiffIFD* raw) {
 void ArwDecoder::DecodeARW(ByteStream &input, uint32 w, uint32 h) {
   BitPumpMSB bits(input);
   uchar8* data = mRaw->getData();
-  ushort16* dest = (ushort16*) & data[0];
+  auto *dest = (ushort16 *)&data[0];
   uint32 pitch = mRaw->pitch / sizeof(ushort16);
   int sum = 0;
   for (uint32 x = w; x--;)
@@ -262,17 +279,17 @@ void ArwDecoder::DecodeARW2(ByteStream &input, uint32 w, uint32 h, uint32 bpp) {
     if (input.getRemainSize() < (w*h*3 / 2))
       h = input.getRemainSize() / (w * 3 / 2) - 1;
 
-    uchar8* data = mRaw->getData();
+    uchar8 *outData = mRaw->getData();
     uint32 pitch = mRaw->pitch;
-    const uchar8 *in = input.getData(input.getRemainSize());
+    const uchar8 *inData = input.getData(input.getRemainSize());
 
     for (uint32 y = 0; y < h; y++) {
-      ushort16* dest = (ushort16*) & data[y*pitch];
+      auto *dest = (ushort16 *)&outData[y * pitch];
       for (uint32 x = 0 ; x < w; x += 2) {
-        uint32 g1 = *in++;
-        uint32 g2 = *in++;
+        uint32 g1 = *inData++;
+        uint32 g2 = *inData++;
         dest[x] = (g1 | ((g2 & 0xf) << 8));
-        uint32 g3 = *in++;
+        uint32 g3 = *inData++;
         dest[x+1] = ((g2 >> 4) | (g3 << 4));
       }
     }
@@ -321,15 +338,15 @@ void ArwDecoder::decodeMetaDataInternal(CameraMetaData *meta) {
       const uchar8 *offdata = priv->getData(4);
       uint32 off = get4LE(offdata,0);
       uint32 length = mFile->getSize()-off;
-      const unsigned char* data = mFile->getData(off, length);
+      const unsigned char *dpd = mFile->getData(off, length);
       uint32 currpos = 8;
       while (currpos+20 < length) {
-        uint32 tag = get4BE(data,currpos);
-        uint32 len = get4LE(data,currpos+4);
+        uint32 tag = get4BE(dpd, currpos);
+        uint32 len = get4LE(dpd, currpos + 4);
         if (tag == 0x574247) { /* WBG */
           ushort16 tmp[4];
           for(uint32 i=0; i<4; i++)
-            tmp[i] = get2LE(data, currpos+12+i*2);
+            tmp[i] = get2LE(dpd, currpos + 12 + i * 2);
 
           mRaw->metadata.wbCoeffs[0] = (float) tmp[0];
           mRaw->metadata.wbCoeffs[1] = (float) tmp[1];
@@ -388,7 +405,7 @@ void ArwDecoder::GetWB() {
     uint32 key = get4LE(data,0);
 
     //TODO: replace ugly inplace decryption of (const) raw data
-    uint32 *ifp_data = (uint32 *) mFile->getDataWrt(off, len);
+    auto *ifp_data = (uint32 *)mFile->getDataWrt(off, len);
     SonyDecrypt(ifp_data, len/4, key);
 
     TiffRootIFD encryptedIFD(priv->getRootIfdData(), off);
@@ -420,7 +437,7 @@ void ArwDecoder::decodeThreaded(RawDecoderThread * t) {
 
   BitPumpPlain bits(*in);
   for (uint32 y = t->start_y; y < t->end_y; y++) {
-    ushort16* dest = (ushort16*) & data[y*pitch];
+    auto *dest = (ushort16 *)&data[y * pitch];
     // Realign
     bits.setBufferPosition(w*y);
     uint32 random = bits.peekBits(24);

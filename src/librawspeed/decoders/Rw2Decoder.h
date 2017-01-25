@@ -21,12 +21,19 @@
 
 #pragma once
 
-#include "decoders/RawDecoder.h"
-#include "tiff/TiffIFD.h"
-#include "io/BitPumpPlain.h"
-#include "parsers/TiffParser.h"
+#include "common/Common.h"       // for uint32, uchar8
+#include "common/RawImage.h"     // for RawImage
+#include "decoders/RawDecoder.h" // for RawDecoder, RawDecoderThread (ptr o...
+#include "io/FileMap.h"          // for FileMap
+#include <string>                // for string
 
 namespace RawSpeed {
+
+class ByteStream;
+
+class CameraMetaData;
+
+class TiffIFD;
 
 class PanaBitpump {
   public:
@@ -45,14 +52,16 @@ class Rw2Decoder :
 {
 public:
   Rw2Decoder(TiffIFD *rootIFD, FileMap* file);
-  virtual ~Rw2Decoder(void);
-  RawImage decodeRawInternal();
-  virtual void decodeMetaDataInternal(CameraMetaData *meta);
-  virtual void checkSupportInternal(CameraMetaData *meta);
+  ~Rw2Decoder() override;
+  RawImage decodeRawInternal() override;
+  void decodeMetaDataInternal(CameraMetaData *meta) override;
+  void checkSupportInternal(CameraMetaData *meta) override;
   TiffIFD *mRootIFD;
-  virtual TiffIFD* getRootIFD() {return mRootIFD;}
+  TiffIFD *getRootIFD() override { return mRootIFD; }
+
 protected:
-  virtual void decodeThreaded(RawDecoderThread* t);
+  void decodeThreaded(RawDecoderThread *t) override;
+
 private:
   void DecodeRw2();
   std::string guessMode();

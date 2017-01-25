@@ -1,7 +1,3 @@
-#include <utility>
-
-#include "common/StdAfx.h"
-#include "metadata/CameraMetaData.h"
 /*
     RawSpeed - RAW file decoder.
 
@@ -20,26 +16,37 @@
     You should have received a copy of the GNU Lesser General Public
     License along with this library; if not, write to the Free Software
     Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
-
-
 */
+
+#include "metadata/CameraMetaData.h"
+#include "common/Common.h"                    // for uint32, TrimSpaces
+#include "metadata/Camera.h"                  // for Camera
+#include "metadata/CameraMetadataException.h" // for ThrowCME
+#include <map>                                // for map, _Rb_tree_iterator
+#include <pugixml.hpp>                        // for xml_document, xml_pars...
+#include <string>                             // for string, allocator, bas...
+#include <utility>                            // for move, pair
+#include <vector>                             // for vector
+
+using namespace std;
 
 namespace RawSpeed {
 
-CameraMetaData::CameraMetaData() {
-}
+using namespace pugi;
+
+CameraMetaData::CameraMetaData() = default;
 
 CameraMetaData::CameraMetaData(const char *docname) {
   xml_document doc;
   xml_parse_result result = doc.load_file(docname);
 
   if (!result) {
-    ThrowCME("CameraMetaData: XML Document could not be parsed successfully. Error was: %s in %s", 
+    ThrowCME("CameraMetaData: XML Document could not be parsed successfully. Error was: %s in %s",
       result.description(), doc.child("node").attribute("attr").value());
   }
 
   for (xml_node camera : doc.child("Cameras").children("Camera")) {
-    Camera *cam = new Camera(camera);
+    auto *cam = new Camera(camera);
 
     if (!addCamera(cam))
       continue;
@@ -51,8 +58,8 @@ CameraMetaData::CameraMetaData(const char *docname) {
   }
 }
 
-CameraMetaData::~CameraMetaData(void) {
-  map<string, Camera*>::iterator i = cameras.begin();
+CameraMetaData::~CameraMetaData() {
+  auto i = cameras.begin();
   for (; i != cameras.end(); ++i) {
     delete((*i).second);
   }

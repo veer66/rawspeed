@@ -20,13 +20,25 @@
     Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
 */
 
-#include "common/StdAfx.h"
 #include "tiff/TiffIFD.h"
-#include "parsers/TiffParser.h"
+#include "common/Common.h"  // for getHostEndianness, uint32, make_unique
+#include "io/IOException.h" // for IOException
+#include "tiff/TiffEntry.h" // for TiffEntry
+#include "tiff/TiffTag.h"   // for TiffTag, ::DNGPRIVATEDATA, ::EXIFIFDPOINTER
+#include <algorithm>        // for move
+#include <cstdint>          // for UINT32_MAX
+#include <map>              // for map, _Rb_tree_const_iterator, allocator
+#include <memory>           // for default_delete, unique_ptr
+#include <string>           // for operator==, string, basic_string
+#include <utility>          // for pair
+#include <vector>           // for vector
+
+using namespace std;
 
 namespace RawSpeed {
 
-TiffIFD::TiffIFD(const DataBuffer& data, uint32 offset, TiffIFD *parent) : parent(parent) {
+TiffIFD::TiffIFD(const DataBuffer &data, uint32 offset, TiffIFD *parent_)
+    : parent(parent_) {
 
   // see parseTiff: UINT32_MAX is used to mark the "virtual" top level TiffRootIFD in a tiff file
   if (offset == UINT32_MAX)
@@ -35,9 +47,9 @@ TiffIFD::TiffIFD(const DataBuffer& data, uint32 offset, TiffIFD *parent) : paren
   ByteStream bs = data;
   bs.setPosition(offset);
 
-  auto entries = bs.getShort(); // Directory entries in this IFD
+  auto numEntries = bs.getShort(); // Directory entries in this IFD
 
-  for (uint32 i = 0; i < entries; i++) {
+  for (uint32 i = 0; i < numEntries; i++) {
     TiffEntryOwner t;
     try {
       t = make_unique<TiffEntry>(bs);
@@ -133,7 +145,9 @@ TiffRootIFDOwner TiffIFD::parseMakerNote(TiffEntry* t)
   // 'newPosition' is the position where the IFD starts
   // 'byteOrderOffset' is the position wher the 2 magic bytes (II/MM) may be found
   // 'context' is a string providing error information in case the byte order parsing should fail
-  auto setup = [&bs](bool rebase, uint32 newPosition, uint32 byteOrderOffset = 0, const char* context = 0) {
+  auto setup = [&bs](bool rebase, uint32 newPosition,
+                     uint32 byteOrderOffset = 0,
+                     const char *context = nullptr) {
     if (rebase)
       bs = bs.getSubStream(bs.getPosition(), bs.getRemainSize());
     if (context)
@@ -200,8 +214,8 @@ TiffEntry* TiffIFD::getEntryRecursive(TiffTag tag) const {
   if (i != entries.end()) {
     return i->second.get();
   }
-  for (auto& i : subIFDs) {
-    TiffEntry* entry = i->getEntryRecursive(tag);
+  for (auto &j : subIFDs) {
+    TiffEntry *entry = j->getEntryRecursive(tag);
     if (entry)
       return entry;
   }

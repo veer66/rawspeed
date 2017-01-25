@@ -20,12 +20,21 @@
     Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
 */
 
-#include "common/StdAfx.h"
 #include "tiff/TiffEntry.h"
-#include "tiff/TiffIFD.h"
-#include <math.h>
+#include "common/Common.h"               // for uint32, ushort16, int32
+#include "parsers/TiffParserException.h" // for ThrowTPE
+#include "tiff/TiffIFD.h"                // for TiffIFD, TiffRootIFD
+#include "tiff/TiffTag.h"                // for ::DNGPRIVATEDATA, ::EXIFIFD...
+#include <algorithm>                     // for move
+#include <cstdint>                       // for UINT32_MAX
+#include <cstring>                       // for strnlen
+#include <string>                        // for string
+
+using namespace std;
 
 namespace RawSpeed {
+
+class DataBuffer;
 
 // order see TiffDataType
 static const uint32 datashifts[] = {0,0,0,1,2,3,0,0,1,2, 3, 2, 3, 2};
@@ -71,10 +80,9 @@ TiffEntry::TiffEntry(ByteStream &bs) {
   }
 }
 
-
-TiffEntry::TiffEntry(TiffTag tag, TiffDataType type, uint32 count, ByteStream&& _data)
-  : data(std::move(_data)), tag(tag), type(type), count(count)
-{
+TiffEntry::TiffEntry(TiffTag tag_, TiffDataType type_, uint32 count_,
+                     ByteStream &&data_)
+    : data(std::move(data_)), tag(tag_), type(type_), count(count_) {
   // check for count << datashift overflow
   if (count > UINT32_MAX >> datashifts[type])
     ThrowTPE("Parse error in TiffEntry: integer overflow in size calculation.");
@@ -171,8 +179,8 @@ float TiffEntry::getFloat(uint32 num) const {
     return b ? (float) a/b : 0.f;
   }
   case TIFF_SRATIONAL: {
-    int a = (int) getInt(num*2);
-    int b = (int) getInt(num*2+1);
+    auto a = (int)getInt(num * 2);
+    auto b = (int)getInt(num * 2 + 1);
     return b ? (float) a/b : 0.f;
   }
   default:

@@ -1,5 +1,3 @@
-#include "common/StdAfx.h"
-#include "decompressors/LJpegPlain.h"
 /*
 RawSpeed - RAW file decoder.
 
@@ -20,6 +18,30 @@ You should have received a copy of the GNU Lesser General Public
 License along with this library; if not, write to the Free Software
 Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
 */
+
+#include "decompressors/LJpegPlain.h"
+#include "common/Common.h"
+#include "common/Point.h"
+#include "io/BitPumpJPEG.h"
+#include "io/ByteStream.h"
+#include "tiff/TiffTag.h"
+#include <algorithm>
+#include <array>
+#include <cassert>
+#include <cfloat>
+#include <cmath>
+#include <cstdarg>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <iostream>
+#include <list>
+#include <map>
+#include <memory>
+#include <numeric>
+#include <sstream>
+#include <string>
+#include <vector>
 
 namespace RawSpeed {
 
@@ -150,7 +172,7 @@ void LJpegPlain::decodeN_X_Y() {
     mRaw->createData();
   }
 
-  HuffmanTable* ht[N_COMP] = {0};
+  HuffmanTable *ht[N_COMP] = {nullptr};
   for (int i = 0; i < N_COMP; ++i)
     ht[i] = huff[frame.compInfo[i].dcTblNo];
 
@@ -189,7 +211,7 @@ void LJpegPlain::decodeN_X_Y() {
   // in full raw (<N,1,1>) the width of a slice is the number of raw pixels,
   // i.e. frame.w * frame.cps
   uint32 pixInSlicedLine = 0;
-  ushort16* dest = (ushort16*)mRaw->getDataUncropped(offX, offY);
+  auto *dest = (ushort16 *)mRaw->getDataUncropped(offX, offY);
 
   for (uint32 y = 0; y < ch; y += Y_S_F) {
     const ushort16* predict = dest;
@@ -237,9 +259,7 @@ void LJpegPlain::decodeN_X_Y() {
 
     if (X_S_F == 1) // will be optimized out
       for (uint32 i = 0; i < skipX; i++)
-        unroll_loop<N_COMP>([&](int i) {
-          ht[i]->decodeNext(bitStream);
-        });
+        unroll_loop<N_COMP>([&](int j) { ht[j]->decodeNext(bitStream); });
 
     // Update predictors
     unroll_loop<N_COMP>([&](int i) {

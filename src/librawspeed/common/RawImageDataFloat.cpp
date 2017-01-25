@@ -16,23 +16,21 @@ Lesser General Public License for more details.
 You should have received a copy of the GNU Lesser General Public
 License along with this library; if not, write to the Free Software
 Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
-
-
 */
 
-#include "common/StdAfx.h"
-#include "common/RawImage.h"
-#include "decoders/RawDecoder.h"  // For exceptions
-
-#if defined(__SSE2__)
-#include <emmintrin.h>
-#endif
+#include "common/Common.h"                // for uchar8, uint32, writeLog
+#include "common/Point.h"                 // for iPoint2D
+#include "common/RawImage.h"              // for RawImageDataFloat, ::TYPE_...
+#include "decoders/RawDecoderException.h" // for ThrowRDE
+#include "metadata/BlackArea.h"           // for BlackArea
+#include <cstddef>                        // for NULL
+#include <vector>                         // for vector
 
 namespace RawSpeed {
 
-  RawImageDataFloat::RawImageDataFloat(void) {
-    bpp = 4;
-    dataType = TYPE_FLOAT32;
+RawImageDataFloat::RawImageDataFloat() {
+  bpp = 4;
+  dataType = TYPE_FLOAT32;
   }
 
   RawImageDataFloat::RawImageDataFloat(const iPoint2D &_dim, uint32 _cpp)
@@ -45,10 +43,8 @@ namespace RawSpeed {
     float accPixels[4] = {0,0,0,0};
     int totalpixels = 0;
 
-    for (uint32 i = 0; i < blackAreas.size(); i++) {
-      BlackArea area = blackAreas[i];
-
-      /* Make sure area sizes are multiple of two, 
+    for (auto area : blackAreas) {
+      /* Make sure area sizes are multiple of two,
       so we have the same amount of pixels for each CFA group */
       area.size = area.size - (area.size&1);
 
@@ -57,7 +53,7 @@ namespace RawSpeed {
         if ((int)area.offset+(int)area.size > uncropped_dim.y)
           ThrowRDE("RawImageData::calculateBlackAreas: Offset + size is larger than height of image");
         for (uint32 y = area.offset; y < area.offset+area.size; y++) {
-          float *pixel = (float*)getDataUncropped(mOffset.x, y);
+          auto *pixel = (float *)getDataUncropped(mOffset.x, y);
           for (int x = mOffset.x; x < dim.x+mOffset.x; x++) {
             accPixels[((y&1)<<1)|(x&1)] += *pixel++;
           }
@@ -70,7 +66,7 @@ namespace RawSpeed {
         if ((int)area.offset+(int)area.size > uncropped_dim.x)
           ThrowRDE("RawImageData::calculateBlackAreas: Offset + size is larger than width of image");
         for (int y = mOffset.y; y < dim.y+mOffset.y; y++) {
-          float *pixel = (float*)getDataUncropped(area.offset, y);
+          auto *pixel = (float *)getDataUncropped(area.offset, y);
           for (uint32 x = area.offset; x < area.size+area.offset; x++) {
             accPixels[((y&1)<<1)|(x&1)] += *pixel++;
           }
@@ -80,8 +76,8 @@ namespace RawSpeed {
     }
 
     if (!totalpixels) {
-      for (int i = 0 ; i < 4; i++)
-        blackLevelSeparate[i] = blackLevel;
+      for (int &i : blackLevelSeparate)
+        i = blackLevel;
       return;
     }
 
@@ -96,10 +92,10 @@ namespace RawSpeed {
     /* If this is not a CFA image, we do not use separate blacklevels, use average */
     if (!isCFA) {
       int total = 0;
-      for (int i = 0 ; i < 4; i++)
-        total+=blackLevelSeparate[i];
-      for (int i = 0 ; i < 4; i++)
-        blackLevelSeparate[i] = (total+2)>>2;
+      for (int i : blackLevelSeparate)
+        total += i;
+      for (int &i : blackLevelSeparate)
+        i = (total + 2) >> 2;
     }
   }
 
@@ -110,7 +106,7 @@ namespace RawSpeed {
       float b = 100000000;
       float m = -10000000;
       for (int row = skipBorder*cpp;row < (dim.y - skipBorder);row++) {
-        float *pixel = (float*)getData(skipBorder, row);
+        auto *pixel = (float *)getData(skipBorder, row);
         for (int col = skipBorder ; col < gw ; col++) {
           b = MIN(*pixel, b);
           m = MAX(*pixel, m);
@@ -135,12 +131,12 @@ namespace RawSpeed {
 
   void RawImageDataFloat::scaleValues(int start_y, int end_y) {
     bool use_sse2;
-#ifdef _MSC_VER 
+#ifdef _MSC_VER
     int info[4];
     __cpuid(info, 1);
     use_sse2 = !!(info[3]&(1 << 26));
 #else
-    use_sse2 = TRUE;
+    use_sse2 = true;
 #endif
 
     float app_scale = 65535.0f / (whitePoint - blackLevelSeparate[0]);
@@ -156,7 +152,7 @@ namespace RawSpeed {
 
       uint32 gw = pitch / 16;
       // 10 bit fraction
-      uint32 mul = (int)(1024.0f * 65535.0f / (float)(whitePoint - blackLevelSeparate[mOffset.x&1]));  
+      uint32 mul = (int)(1024.0f * 65535.0f / (float)(whitePoint - blackLevelSeparate[mOffset.x&1]));
       mul |= ((int)(1024.0f * 65535.0f / (float)(whitePoint - blackLevelSeparate[(mOffset.x+1)&1])))<<16;
       uint32 b = blackLevelSeparate[mOffset.x&1] | (blackLevelSeparate[(mOffset.x+1)&1]<<16);
 
@@ -181,7 +177,7 @@ namespace RawSpeed {
       for (int y = start_y; y < end_y; y++) {
         __m128i* pixel = (__m128i*) & data[(mOffset.y+y)*pitch];
         __m128i ssescale, ssesub;
-        if (((y+mOffset.y)&1) == 0) { 
+        if (((y+mOffset.y)&1) == 0) {
           ssesub = _mm_load_si128((__m128i*)&sub_mul[0]);
           ssescale = _mm_load_si128((__m128i*)&sub_mul[4]);
         } else {
@@ -260,7 +256,7 @@ namespace RawSpeed {
       sub[i] = (float)blackLevelSeparate[v];
     }
     for (int y = start_y; y < end_y; y++) {
-      float *pixel = (float*)getData(0, y);
+      auto *pixel = (float *)getData(0, y);
       float *mul_local = &mul[2*(y&1)];
       float *sub_local = &sub[2*(y&1)];
       for (int x = 0 ; x < gw; x++) {
@@ -353,7 +349,7 @@ void RawImageDataFloat::fixBadPixel( uint32 x, uint32 y, int component )
       total_pixel += values[i] * dist[i];
 
   total_pixel /= total_div;
-  float* pix = (float*)getDataUncropped(x, y);
+  auto *pix = (float *)getDataUncropped(x, y);
   pix[component] = total_pixel;
 
   /* Process other pixels - could be done inline, since we have the weights */
@@ -369,8 +365,8 @@ void RawImageDataFloat::doLookup( int start_y, int end_y ) {
 }
 
 void RawImageDataFloat::setWithLookUp(ushort16 value, uchar8* dst, uint32* random) {
-  float* dest = (float*)dst;
-  if (table == NULL) {
+  auto *dest = (float *)dst;
+  if (table == nullptr) {
     *dest = (float)value * (1.0f/65535);
     return;
   }
