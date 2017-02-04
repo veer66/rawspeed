@@ -20,25 +20,25 @@
 */
 
 #include "decoders/OrfDecoder.h"
-#include "common/Common.h"                // for other_abs, ushort16, uint32
-#include "common/Point.h"                 // for iPoint2D
-#include "decoders/RawDecoderException.h" // for ThrowRDE
-#include "decompressors/UncompressedDecompressor.h"
-#include "io/BitPumpMSB.h"               // for BitPumpMSB
-#include "io/ByteStream.h"               // for ByteStream
-#include "io/IOException.h"              // for IOException
-#include "metadata/ColorFilterArray.h"   // for ColorFilterArray, ::CFA_GREEN
-#include "parsers/TiffParserException.h" // for TiffParserException
-#include "tiff/TiffEntry.h"              // for TiffEntry
-#include "tiff/TiffIFD.h"                // for TiffIFD, TiffRootIFD
-#include "tiff/TiffTag.h"                // for ::MODEL, TiffTag, ::MAKE
-#include <algorithm>                     // for min
-#include <cstdio>                        // for NULL
-#include <cstring>                       // for memset
-#include <map>                           // for map, _Rb_tree_iterator
-#include <memory>                        // for unique_ptr
-#include <string>                        // for string
-#include <vector>                        // for vector
+#include "common/Common.h"                          // for uint32, ushort16
+#include "common/Point.h"                           // for iPoint2D
+#include "decoders/RawDecoderException.h"           // for ThrowRDE
+#include "decompressors/UncompressedDecompressor.h" // for UncompressedDeco...
+#include "io/BitPumpMSB.h"                          // for BitPumpMSB
+#include "io/ByteStream.h"                          // for ByteStream
+#include "io/IOException.h"                         // for IOException
+#include "metadata/ColorFilterArray.h"              // for ColorFilterArray
+#include "parsers/TiffParserException.h"            // for TiffParserException
+#include "tiff/TiffEntry.h"                         // for TiffEntry
+#include "tiff/TiffIFD.h"                           // for TiffRootIFD, Tif...
+#include "tiff/TiffTag.h"                           // for TiffTag, TiffTag...
+#include <algorithm>                                // for min
+#include <cstdlib>                                  // for abs
+#include <cstring>                                  // for memset
+#include <map>                                      // for map, _Rb_tree_it...
+#include <memory>                                   // for unique_ptr
+#include <string>                                   // for string
+#include <vector>                                   // for vector
 
 using namespace std;
 
@@ -192,12 +192,12 @@ void OrfDecoder::decodeCompressed(ByteStream& s, uint32 w, uint32 h) {
         int upMinusNw = up - nw0;
         // Check if sign is different, and one is not zero
         if (leftMinusNw * upMinusNw < 0) {
-          if (other_abs(leftMinusNw) > 32 || other_abs(upMinusNw) > 32)
+          if (abs(leftMinusNw) > 32 || abs(upMinusNw) > 32)
             pred = left0 + upMinusNw;
           else
             pred = (left0 + up) >> 1;
         } else
-          pred = other_abs(leftMinusNw) > other_abs(upMinusNw) ? left0 : up;
+          pred = abs(leftMinusNw) > abs(upMinusNw) ? left0 : up;
 
         dest[x] = pred + ((diff << 2) | low);
         // Set predictors
@@ -245,12 +245,12 @@ void OrfDecoder::decodeCompressed(ByteStream& s, uint32 w, uint32 h) {
 
         // Check if sign is different, and one is not zero
         if (leftMinusNw * upMinusNw < 0) {
-          if (other_abs(leftMinusNw) > 32 || other_abs(upMinusNw) > 32)
+          if (abs(leftMinusNw) > 32 || abs(upMinusNw) > 32)
             pred = left1 + upMinusNw;
           else
             pred = (left1 + up) >> 1;
         } else
-          pred = other_abs(leftMinusNw) > other_abs(upMinusNw) ? left1 : up;
+          pred = abs(leftMinusNw) > abs(upMinusNw) ? left1 : up;
 
         dest[x] = left1 = pred + ((diff << 2) | low);
         nw1 = up;

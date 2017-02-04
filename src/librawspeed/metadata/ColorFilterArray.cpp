@@ -19,14 +19,15 @@
 */
 
 #include "metadata/ColorFilterArray.h"
-#include "common/Common.h"                // for uint32, writeLog, DEBUG_PR...
+#include "common/Common.h"                // for writeLog, uint32, DEBUG_PR...
 #include "common/Point.h"                 // for iPoint2D
 #include "decoders/RawDecoderException.h" // for ThrowRDE
+#include <algorithm>                      // for fill
 #include <cstdarg>                        // for va_arg, va_end, va_list
-#include <cstdio>                         // for NULL
-#include <cstring>                        // for memcpy, memset
+#include <cstdlib>                        // for size_t, abs
 #include <map>                            // for map
-#include <string>                         // for string
+#include <stdexcept>                      // for out_of_range
+#include <string>                         // for string, allocator
 
 using namespace std;
 
@@ -63,7 +64,7 @@ CFAColor ColorFilterArray::getColorAt( int x, int y ) const
   x = (x % size.x + size.x) % size.x;
   y = (y % size.y + size.y) % size.y;
 
-  return cfa[x + y * size.x];
+  return cfa[x + (size_t)y * size.x];
 }
 
 void ColorFilterArray::setCFA( iPoint2D in_size, ... )
@@ -91,7 +92,7 @@ void ColorFilterArray::shiftLeft(int n) {
   vector<CFAColor> tmp(size.area());
   for (int y = 0; y < size.y; ++y) {
     for (int x = 0; x < size.x; ++x) {
-      tmp[x + y * size.x] = getColorAt(x+n, y);
+      tmp[x + (size_t)y * size.x] = getColorAt(x + n, y);
     }
   }
   cfa = tmp;
@@ -108,7 +109,7 @@ void ColorFilterArray::shiftDown(int n) {
   vector<CFAColor> tmp(size.area());
   for (int y = 0; y < size.y; ++y) {
     for (int x = 0; x < size.x; ++x) {
-      tmp[x + y * size.x] = getColorAt(x, y+n);
+      tmp[x + (size_t)y * size.x] = getColorAt(x, y + n);
     }
   }
   cfa = tmp;
@@ -173,7 +174,7 @@ void ColorFilterArray::setColorAt(iPoint2D pos, CFAColor c) {
     ThrowRDE("ColorFilterArray::SetColor: position out of CFA pattern");
   if (pos.y >= size.y || pos.y < 0)
     ThrowRDE("ColorFilterArray::SetColor: position out of CFA pattern");
-  cfa[pos.x+pos.y*size.x] = c;
+  cfa[pos.x + (size_t)pos.y * size.x] = c;
 }
 
 static uint32 toDcrawColor( CFAColor c )

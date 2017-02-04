@@ -19,14 +19,15 @@
 */
 
 #include "common/RawImage.h"
-#include "common/Memory.h"                // for alignedMallocArray, alignedFree
+#include "common/Memory.h"                // for alignedFree, alignedMalloc...
 #include "decoders/RawDecoderException.h" // for ThrowRDE, RawDecoderException
 #include "io/IOException.h"               // for IOException
 #include "parsers/TiffParserException.h"  // for TiffParserException
+#include <algorithm>                      // for min
 #include <cassert>                        // for assert
 #include <cmath>                          // for NAN
 #include <cstdlib>                        // for free
-#include <cstring>                        // for memset, memcpy
+#include <cstring>                        // for memset, memcpy, strdup
 
 using namespace std;
 
@@ -360,7 +361,9 @@ void RawImageData::blitFrom(const RawImage& src, const iPoint2D& srcPos,
     return;
 
   // TODO: Move offsets after crop.
-  BitBlt(getData(dest_rect.pos.x, dest_rect.pos.y), pitch, src->getData(src_rect.pos.x, src_rect.pos.y), src->pitch, blitsize.x*bpp, blitsize.y);
+  copyPixels(getData(dest_rect.pos.x, dest_rect.pos.y), pitch,
+             src->getData(src_rect.pos.x, src_rect.pos.y), src->pitch,
+             blitsize.x * bpp, blitsize.y);
 }
 
 /* Does not take cfa into consideration */

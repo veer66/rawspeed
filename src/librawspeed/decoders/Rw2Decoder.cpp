@@ -20,24 +20,24 @@
 */
 
 #include "decoders/Rw2Decoder.h"
-#include "common/Common.h"                // for uint32, uchar8, _RPT1, ush...
-#include "common/Point.h"                 // for iPoint2D
-#include "decoders/RawDecoderException.h" // for ThrowRDE
-#include "decompressors/UncompressedDecompressor.h"
-#include "io/Buffer.h"                 // for Buffer::size_type
-#include "io/ByteStream.h"             // for ByteStream
-#include "metadata/ColorFilterArray.h" // for ::CFA_GREEN, ColorFilterArray
-#include "tiff/TiffEntry.h"            // for TiffEntry
-#include "tiff/TiffIFD.h"              // for TiffIFD
-#include "tiff/TiffTag.h"              // for TiffTag, ::STRIPOFFSETS
-#include <algorithm>                   // for min
-#include <cmath>                       // for fabs
-#include <cstdio>                      // for NULL
-#include <cstring>                     // for memcpy
-#include <map>                         // for map, _Rb_tree_iterator
-#include <pthread.h>                   // for pthread_mutex_lock, pthrea...
-#include <string>                      // for string, allocator
-#include <vector>                      // for vector
+#include "common/Common.h"                          // for uint32, uchar8
+#include "common/Point.h"                           // for iPoint2D
+#include "decoders/RawDecoder.h"                    // for RawDecoderThread
+#include "decoders/RawDecoderException.h"           // for ThrowRDE
+#include "decompressors/UncompressedDecompressor.h" // for UncompressedDeco...
+#include "io/ByteStream.h"                          // for ByteStream
+#include "metadata/ColorFilterArray.h"              // for CFAColor::CFA_GREEN
+#include "tiff/TiffEntry.h"                         // for TiffEntry
+#include "tiff/TiffIFD.h"                           // for TiffIFD, TiffRoo...
+#include "tiff/TiffTag.h"                           // for TiffTag, TiffTag...
+#include <algorithm>                                // for min, move
+#include <cmath>                                    // for fabs
+#include <cstring>                                  // for memcpy
+#include <map>                                      // for map, _Rb_tree_it...
+#include <memory>                                   // for unique_ptr
+#include <pthread.h>                                // for pthread_mutex_lock
+#include <string>                                   // for string, allocator
+#include <vector>                                   // for vector
 
 using namespace std;
 
@@ -45,11 +45,49 @@ namespace RawSpeed {
 
 class CameraMetaData;
 
-Rw2Decoder::~Rw2Decoder() {
-  if (input_start)
-    delete input_start;
-  input_start = nullptr;
-}
+struct PanaBitpump
+{
+  static constexpr uint32 BufSize = 0x4000;
+  ByteStream input;
+  vector<uchar8> buf;
+  int vbits = 0;
+  uint32 load_flags;
+
+  PanaBitpump(ByteStream&& input_, int load_flags_)
+    : input(move(input_)), load_flags(load_flags_)
+  {
+    // get one more byte, so the return statement of getBits does not have
+    // to special case for accessing the last byte
+    buf.resize(BufSize + 1UL);
+  }
+
+  void skipBytes(int bytes)
+  {
+    int blocks = (bytes / BufSize) * BufSize;
+    input.skipBytes(blocks);
+    for (int i = blocks; i < bytes; i++)
+      getBits(8);
+  }
+
+  uint32 getBits(int nbits)
+  {
+    if (!vbits) {
+      /* On truncated files this routine will just return just for the truncated
+      * part of the file. Since there is no chance of affecting output buffer
+      * size we allow the decoder to decode this
+      */
+      auto size = min(input.getRemainSize(), BufSize - load_flags);
+      memcpy(buf.data() + load_flags, input.getData(size), size);
+
+      size = min(input.getRemainSize(), load_flags);
+      if (size != 0)
+        memcpy(buf.data(), input.getData(size), size);
+    }
+    vbits = (vbits - nbits) & 0x1ffff;
+    int byte = vbits >> 3 ^ 0x3ff0;
+    return (buf[byte] | buf[byte + 1UL] << 8) >> (vbits & 7) & ~(-(1 << nbits));
+  }
+};
 
 RawImage Rw2Decoder::decodeRawInternal() {
 
@@ -74,17 +112,16 @@ RawImage Rw2Decoder::decodeRawInternal() {
     if (offsets->count != 1) {
       ThrowRDE("RW2 Decoder: Multiple Strips found: %u", offsets->count);
     }
-    int off = offsets->getInt();
-    if (!mFile->isValid(off))
+    offset = offsets->getInt();
+    if (!mFile->isValid(offset))
       ThrowRDE("Panasonic RAW Decoder: Invalid image data offset, cannot decode.");
 
     mRaw->dim = iPoint2D(width, height);
     mRaw->createData();
 
-    uint32 size = mFile->getSize() - off;
-    input_start = new ByteStream(mFile, off);
+    uint32 size = mFile->getSize() - offset;
 
-    UncompressedDecompressor u(*input_start, mRaw, uncorrectedRawValues);
+    UncompressedDecompressor u(ByteStream(mFile, offset), mRaw, uncorrectedRawValues);
 
     if (size >= width*height*2) {
       // It's completely unpacked little-endian
@@ -107,13 +144,12 @@ RawImage Rw2Decoder::decodeRawInternal() {
       ThrowRDE("RW2 Decoder: Multiple Strips found: %u", offsets->count);
     }
 
-    load_flags = 0x2008;
-    int off = offsets->getInt();
+    offset = offsets->getInt();
 
-    if (!mFile->isValid(off))
+    if (!mFile->isValid(offset))
       ThrowRDE("RW2 Decoder: Invalid image data offset, cannot decode.");
 
-    input_start = new ByteStream(mFile, off);
+    load_flags = 0x2008;
     DecodeRw2();
   }
 
@@ -138,9 +174,7 @@ void Rw2Decoder::decodeThreaded(RawDecoderThread * t) {
   skip += w * 2 * t->start_y;
   skip /= 8;
 
-  ByteStream bs = *input_start;
-  PanaBitpump bits(&bs);
-  bits.load_flags = load_flags;
+  PanaBitpump bits(ByteStream(mFile, offset), load_flags);
   bits.skipBytes(skip);
 
   vector<uint32> zero_pos;
@@ -304,45 +338,6 @@ std::string Rw2Decoder::guessMode() {
   }
   writeLog(DEBUG_PRIO_EXTRA, "Mode guess: '%s'\n", closest_match.c_str());
   return closest_match;
-}
-
-static const uint32 BufSize = 0x4000;
-
-PanaBitpump::PanaBitpump(ByteStream* _input) : input(_input), vbits(0) {
-  // get one more byte, so the return statement of getBits does not have
-  // to special case for accessing the last byte
-  buf = new uchar8[BufSize + 1];
-}
-
-PanaBitpump::~PanaBitpump() {
-  delete [] buf;
-}
-
-void PanaBitpump::skipBytes(int bytes) {
-  int blocks = (bytes / BufSize) * BufSize;
-  input->skipBytes(blocks);
-  for (int i = blocks; i < bytes; i++)
-    getBits(8);
-}
-
-uint32 PanaBitpump::getBits(int nbits) {
-  int byte;
-
-  if (!vbits) {
-    /* On truncated files this routine will just return just for the truncated
-    * part of the file. Since there is no chance of affecting output buffer
-    * size we allow the decoder to decode this
-    */
-    ByteStream::size_type size = min(input->getRemainSize(), BufSize - load_flags);
-    memcpy(buf + load_flags, input->getData(size), size);
-
-    size = min(input->getRemainSize(), load_flags);
-    if (size != 0)
-      memcpy(buf, input->getData(size), size);
-  }
-  vbits = (vbits - nbits) & 0x1ffff;
-  byte = vbits >> 3 ^ 0x3ff0;
-  return (buf[byte] | buf[byte + 1] << 8) >> (vbits & 7) & ~(-(1 << nbits));
 }
 
 } // namespace RawSpeed

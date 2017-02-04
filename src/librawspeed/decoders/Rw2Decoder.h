@@ -21,29 +21,19 @@
 
 #pragma once
 
-#include "common/Common.h"       // for uint32, uchar8
-#include "common/RawImage.h"     // for RawImage
-#include "decoders/AbstractTiffDecoder.h"
-#include "io/FileMap.h"          // for FileMap
-#include <string>                // for string
+#include "common/Common.h"                // for uint32
+#include "common/RawImage.h"              // for RawImage
+#include "decoders/AbstractTiffDecoder.h" // for AbstractTiffDecoder
+#include "io/FileMap.h"                   // for FileMap
+#include "tiff/TiffIFD.h"                 // for TiffRootIFDOwner
+#include <algorithm>                      // for move
+#include <string>                         // for string
 
 namespace RawSpeed {
 
-class ByteStream;
-
 class CameraMetaData;
 
-class PanaBitpump {
-  public:
-  PanaBitpump(ByteStream* input);
-  virtual ~PanaBitpump();
-  ByteStream* input;
-  uchar8* buf;
-  int vbits;
-  uint32 load_flags;
-  uint32 getBits(int nbits);
-  void skipBytes(int bytes);
-};
+class RawDecoderThread;
 
 class Rw2Decoder final : public AbstractTiffDecoder
 {
@@ -52,7 +42,6 @@ public:
   // using AbstractTiffDecoder::AbstractTiffDecoder;
   Rw2Decoder(TiffRootIFDOwner&& root, FileMap* file)
     : AbstractTiffDecoder(move(root), file) {}
-  ~Rw2Decoder() override;
 
   RawImage decodeRawInternal() override;
   void decodeMetaDataInternal(CameraMetaData *meta) override;
@@ -65,8 +54,8 @@ protected:
 private:
   void DecodeRw2();
   std::string guessMode();
-  ByteStream* input_start = nullptr;
-  uint32 load_flags;
+  uint32 offset = 0;
+  uint32 load_flags = 0;
 };
 
 } // namespace RawSpeed

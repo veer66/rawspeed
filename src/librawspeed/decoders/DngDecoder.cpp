@@ -27,16 +27,19 @@
 #include "metadata/BlackArea.h"           // for BlackArea
 #include "metadata/Camera.h"              // for Camera
 #include "metadata/CameraMetaData.h"      // for CameraMetaData
-#include "metadata/ColorFilterArray.h"    // for ColorFilterArray, CFAColor
+#include "metadata/ColorFilterArray.h"    // for CFAColor, ColorFilterArray
 #include "parsers/TiffParserException.h"  // for TiffParserException
 #include "tiff/TiffEntry.h"               // for TiffEntry, TiffDataType::T...
-#include "tiff/TiffIFD.h"                 // for TiffIFD
-#include "tiff/TiffTag.h"                 // for TiffTag::MODEL, TiffTag::MAKE
+#include "tiff/TiffIFD.h"                 // for TiffIFD, TiffRootIFD, TiffID
+#include "tiff/TiffTag.h"                 // for TiffTag::UNIQUECAMERAMODEL
+#include <algorithm>                      // for move
 #include <cstdio>                         // for printf
 #include <cstring>                        // for memset
 #include <map>                            // for map
-#include <string>                         // for allocator, string, operator+
-#include <vector>                         // for vector
+#include <memory>                         // for unique_ptr
+#include <stdexcept>                      // for out_of_range
+#include <string>                         // for string, operator+, basic_s...
+#include <vector>                         // for vector, allocator
 
 using namespace std;
 
@@ -145,7 +148,7 @@ void DngDecoder::parseCFA(TiffIFD* raw) {
   }
 }
 
-void DngDecoder::decodeData(TiffIFD* raw) {
+void DngDecoder::decodeData(TiffIFD* raw, int compression) {
   mRaw->createData();
 
   if (compression == 8 && sample_format != 3) {
@@ -254,7 +257,7 @@ RawImage DngDecoder::decodeRawInternal() {
   if (raw->hasEntry(SAMPLEFORMAT))
     sample_format = raw->getEntry(SAMPLEFORMAT)->getInt();
 
-  compression = raw->getEntry(COMPRESSION)->getShort();
+  int compression = raw->getEntry(COMPRESSION)->getShort();
 
   if (sample_format == 1)
     mRaw = RawImage::create(TYPE_USHORT16);
@@ -298,7 +301,7 @@ RawImage DngDecoder::decodeRawInternal() {
 
     // Now load the image
     try {
-      decodeData(raw);
+      decodeData(raw, compression);
     } catch (TiffParserException& e) {
       ThrowRDE("DNG Decoder: Unsupported format, tried strips and tiles:\n%s",
                e.what());

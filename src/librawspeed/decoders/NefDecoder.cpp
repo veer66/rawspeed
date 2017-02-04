@@ -20,30 +20,29 @@
 */
 
 #include "decoders/NefDecoder.h"
-#include "common/Common.h"                   // for uint32, uchar8, ushort16
-#include "common/Memory.h"                   // for alignedMallocArray, alignedFree
-#include "common/Point.h"                    // for iPoint2D
-#include "decoders/RawDecoderException.h"    // for ThrowRDE, RawDecoderExc...
-#include "decompressors/NikonDecompressor.h" // for decompressNikon
-#include "decompressors/UncompressedDecompressor.h"
-#include "io/BitPumpMSB.h"             // for BitPumpMSB
-#include "io/BitPumpMSB32.h"           // for BitPumpMSB32
-#include "io/ByteStream.h"             // for ByteStream
-#include "io/IOException.h"            // for IOException, ThrowIOE
-#include "metadata/CameraMetaData.h"   // for CameraMetaData
-#include "metadata/ColorFilterArray.h" // for ::CFA_BLUE, ::CFA_GREEN
-#include "tiff/TiffEntry.h"            // for TiffEntry, ::TIFF_UNDEF...
-#include "tiff/TiffIFD.h"              // for TiffIFD
-#include "tiff/TiffTag.h"              // for TiffTag, ::IMAGEWIDTH
-#include <cmath>                       // for pow, exp, log
-#include <cstdio>                      // for NULL
-#include <cstring>                     // for strncmp
-#include <map>                         // for map, _Rb_tree_iterator
-#include <memory>                      // for allocator_traits<>::val...
-#include <sstream>                     // for stringstream
-#include <string>                      // for string, operator==, bas...
-#include <utility>                     // for pair
-#include <vector>                      // for vector
+#include "common/Common.h"                          // for uint32, uchar8
+#include "common/Memory.h"                          // for alignedFree, ali...
+#include "common/Point.h"                           // for iPoint2D
+#include "decoders/RawDecoderException.h"           // for ThrowRDE, RawDec...
+#include "decompressors/NikonDecompressor.h"        // for decompressNikon
+#include "decompressors/UncompressedDecompressor.h" // for UncompressedDeco...
+#include "io/BitPumpMSB.h"                          // for BitPumpMSB
+#include "io/BitPumpMSB32.h"                        // for BitPumpMSB32
+#include "io/ByteStream.h"                          // for ByteStream
+#include "io/IOException.h"                         // for IOException, Thr...
+#include "metadata/CameraMetaData.h"                // for CameraMetaData
+#include "metadata/ColorFilterArray.h"              // for CFAColor::CFA_GREEN
+#include "tiff/TiffEntry.h"                         // for TiffEntry, TiffD...
+#include "tiff/TiffIFD.h"                           // for TiffRootIFD, Tif...
+#include "tiff/TiffTag.h"                           // for TiffTag, TiffTag...
+#include <cmath>                                    // for pow, exp, log
+#include <cstring>                                  // for strncmp
+#include <map>                                      // for map, _Rb_tree_it...
+#include <memory>                                   // for unique_ptr, allo...
+#include <sstream>                                  // for operator<<, ostr...
+#include <string>                                   // for string, operator==
+#include <utility>                                  // for pair
+#include <vector>                                   // for vector
 
 using namespace std;
 
@@ -611,7 +610,7 @@ void NefDecoder::DecodeNikonSNef(ByteStream &input, uint32 w, uint32 h) {
   // Scale output values to 16 bits.
   for (int i = 0 ; i < 4096; i++) {
     int c = curve[i];
-    curve[i] = clampbits(c << 2, 16);
+    curve[i] = clampBits(c << 2, 16);
   }
   mRaw->setTable(curve, 4095, true);
   alignedFree(curve);
@@ -656,21 +655,21 @@ void NefDecoder::DecodeNikonSNef(ByteStream &input, uint32 w, uint32 h) {
       cb2 -= 2048;
       cr2 -= 2048;
 
-      mRaw->setWithLookUp(clampbits((int)(y1 + 1.370705 * cr), 12), tmpch, &random);
-      dest[x] = clampbits((inv_wb_r * tmp + (1<<9)) >> 10, 15);
+      mRaw->setWithLookUp(clampBits((int)(y1 + 1.370705 * cr), 12), tmpch, &random);
+      dest[x] = clampBits((inv_wb_r * tmp + (1<<9)) >> 10, 15);
 
-      mRaw->setWithLookUp(clampbits((int)(y1 - 0.337633 * cb - 0.698001 * cr), 12), (uchar8*)&dest[x+1], &random);
+      mRaw->setWithLookUp(clampBits((int)(y1 - 0.337633 * cb - 0.698001 * cr), 12), (uchar8*)&dest[x+1], &random);
 
-      mRaw->setWithLookUp(clampbits((int)(y1 + 1.732446 * cb), 12), tmpch, &random);
-      dest[x+2]   = clampbits((inv_wb_b * tmp + (1<<9)) >> 10, 15);
+      mRaw->setWithLookUp(clampBits((int)(y1 + 1.732446 * cb), 12), tmpch, &random);
+      dest[x+2]   = clampBits((inv_wb_b * tmp + (1<<9)) >> 10, 15);
 
-      mRaw->setWithLookUp(clampbits((int)(y2 + 1.370705 * cr2), 12), tmpch, &random);
-      dest[x+3] = clampbits((inv_wb_r * tmp + (1<<9)) >> 10, 15);
+      mRaw->setWithLookUp(clampBits((int)(y2 + 1.370705 * cr2), 12), tmpch, &random);
+      dest[x+3] = clampBits((inv_wb_r * tmp + (1<<9)) >> 10, 15);
 
-      mRaw->setWithLookUp(clampbits((int)(y2 - 0.337633 * cb2 - 0.698001 * cr2), 12), (uchar8*)&dest[x+4], &random);
+      mRaw->setWithLookUp(clampBits((int)(y2 - 0.337633 * cb2 - 0.698001 * cr2), 12), (uchar8*)&dest[x+4], &random);
 
-      mRaw->setWithLookUp(clampbits((int)(y2 + 1.732446 * cb2), 12), tmpch, &random);
-      dest[x+5] = clampbits((inv_wb_b * tmp + (1<<9)) >> 10, 15);
+      mRaw->setWithLookUp(clampBits((int)(y2 + 1.732446 * cb2), 12), tmpch, &random);
+      dest[x+5] = clampBits((inv_wb_b * tmp + (1<<9)) >> 10, 15);
     }
   }
   mRaw->setTable(nullptr);
