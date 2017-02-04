@@ -21,6 +21,7 @@
 
 #include "decoders/NefDecoder.h"
 #include "common/Common.h"                   // for uint32, uchar8, ushort16
+#include "common/Memory.h"                   // for alignedMallocArray, alignedFree
 #include "common/Point.h"                    // for iPoint2D
 #include "decoders/RawDecoderException.h"    // for ThrowRDE, RawDecoderExc...
 #include "decompressors/NikonDecompressor.h" // for decompressNikon
@@ -47,17 +48,6 @@
 using namespace std;
 
 namespace RawSpeed {
-
-NefDecoder::NefDecoder(TiffIFD *rootIFD, FileMap* file) :
-    RawDecoder(file), mRootIFD(rootIFD) {
-  decoderVersion = 5;
-}
-
-NefDecoder::~NefDecoder() {
-  if (mRootIFD)
-    delete mRootIFD;
-  mRootIFD = nullptr;
-}
 
 RawImage NefDecoder::decodeRawInternal() {
   vector<TiffIFD*> data = mRootIFD->getIFDsWithTag(CFAPATTERN);
@@ -379,18 +369,14 @@ void NefDecoder::DecodeSNefUncompressed() {
 }
 
 void NefDecoder::checkSupportInternal(CameraMetaData *meta) {
-  vector<TiffIFD*> data = mRootIFD->getIFDsWithTag(MODEL);
-  if (data.empty())
-    ThrowRDE("NEF Support check: Model name not found");
-  string make = data[0]->getEntry(MAKE)->getString();
-  string model = data[0]->getEntry(MODEL)->getString();
-
+  auto id = mRootIFD->getID();
   string mode = getMode();
   string extended_mode = getExtendedMode(mode);
 
-  if (meta->hasCamera(make, model, extended_mode))
-    this->checkCameraSupported(meta, make, model, extended_mode);
-  else this->checkCameraSupported(meta, make, model, mode);
+  if (meta->hasCamera(id.make, id.model, extended_mode))
+    checkCameraSupported(meta, id, extended_mode);
+  else
+    checkCameraSupported(meta, id, mode);
 }
 
 string NefDecoder::getMode() {
@@ -430,18 +416,8 @@ void NefDecoder::decodeMetaDataInternal(CameraMetaData *meta) {
   int iso = 0;
   mRaw->cfa.setCFA(iPoint2D(2,2), CFA_RED, CFA_GREEN, CFA_GREEN, CFA_BLUE);
 
-  vector<TiffIFD*> data = mRootIFD->getIFDsWithTag(MODEL);
-
-  if (data.empty())
-    ThrowRDE("NEF Meta Decoder: Model name not found");
-  if (!data[0]->hasEntry(MAKE))
-    ThrowRDE("NEF Support: Make name not found");
-
   int white = mRaw->whitePoint;
   int black = mRaw->blackLevel;
-
-  string make = data[0]->getEntry(MAKE)->getString();
-  string model = data[0]->getEntry(MODEL)->getString();
 
   if (mRootIFD->hasEntryRecursive(ISOSPEEDRATINGS))
     iso = mRootIFD->getEntryRecursive(ISOSPEEDRATINGS)->getInt();
@@ -541,18 +517,18 @@ void NefDecoder::decodeMetaDataInternal(CameraMetaData *meta) {
 
         // Finally set the WB coeffs
         uint32 off = (version == 0x204) ? 6 : 14;
-        mRaw->metadata.wbCoeffs[0] = (float)get2BE(buf, off);
-        mRaw->metadata.wbCoeffs[1] = (float)get2BE(buf, off+2);
-        mRaw->metadata.wbCoeffs[2] = (float)get2BE(buf, off+6);
+        mRaw->metadata.wbCoeffs[0] = (float)getU16BE(buf + off + 0);
+        mRaw->metadata.wbCoeffs[1] = (float)getU16BE(buf + off + 2);
+        mRaw->metadata.wbCoeffs[2] = (float)getU16BE(buf + off + 6);
       }
     }
   } else if (mRootIFD->hasEntryRecursive((TiffTag)0x0014)) {
     TiffEntry *wb = mRootIFD->getEntryRecursive((TiffTag)0x0014);
     auto *tmp = (uchar8 *)wb->getData(wb->count);
     if (wb->count == 2560 && wb->type == TIFF_UNDEFINED) {
-      mRaw->metadata.wbCoeffs[0] = (float) get2BE(tmp, 1248) / 256.0f;
+      mRaw->metadata.wbCoeffs[0] = (float) getU16BE(tmp + 1248) / 256.0f;
       mRaw->metadata.wbCoeffs[1] = 1.0f;
-      mRaw->metadata.wbCoeffs[2] = (float) get2BE(tmp, 1250) / 256.0f;
+      mRaw->metadata.wbCoeffs[2] = (float) getU16BE(tmp + 1250) / 256.0f;
     } else if (!strncmp((char *)tmp,"NRW ",4)) {
       uint32 offset = 0;
       if (strncmp((char *)tmp + 4, "0100", 4) != 0 && wb->count > 72)
@@ -562,9 +538,9 @@ void NefDecoder::decodeMetaDataInternal(CameraMetaData *meta) {
 
       if (offset) {
         tmp += offset;
-        mRaw->metadata.wbCoeffs[0] = (float) (get4LE(tmp,0) << 2);
-        mRaw->metadata.wbCoeffs[1] = (float) (get4LE(tmp,4) + get4LE(tmp,8));
-        mRaw->metadata.wbCoeffs[2] = (float) (get4LE(tmp,12) << 2);
+        mRaw->metadata.wbCoeffs[0] = (float)(getU32LE(tmp + 0) << 2);
+        mRaw->metadata.wbCoeffs[1] = (float)(getU32LE(tmp + 4) + getU32LE(tmp + 8));
+        mRaw->metadata.wbCoeffs[2] = (float)(getU32LE(tmp + 12) << 2);
       }
     }
   }
@@ -574,14 +550,15 @@ void NefDecoder::decodeMetaDataInternal(CameraMetaData *meta) {
     mRaw->metadata.wbCoeffs[2] *= 256/317.0;
   }
 
+  auto id = mRootIFD->getID();
   string mode = getMode();
   string extended_mode = getExtendedMode(mode);
-  if (meta->hasCamera(make, model, extended_mode)) {
-    setMetaData(meta, make, model, extended_mode, iso);
-  } else if (meta->hasCamera(make, model, mode)) {
-    setMetaData(meta, make, model, mode, iso);
+  if (meta->hasCamera(id.make, id.model, extended_mode)) {
+    setMetaData(meta, id, extended_mode, iso);
+  } else if (meta->hasCamera(id.make, id.model, mode)) {
+    setMetaData(meta, id, mode, iso);
   } else {
-    setMetaData(meta, make, model, "", iso);
+    setMetaData(meta, id, "", iso);
   }
 
   if (white != 65536)
@@ -637,7 +614,7 @@ void NefDecoder::DecodeNikonSNef(ByteStream &input, uint32 w, uint32 h) {
     curve[i] = clampbits(c << 2, 16);
   }
   mRaw->setTable(curve, 4095, true);
-  _aligned_free(curve);
+  alignedFree(curve);
 
   ushort16 tmp;
   auto *tmpch = (uchar8 *)&tmp;
@@ -702,7 +679,7 @@ void NefDecoder::DecodeNikonSNef(ByteStream &input, uint32 w, uint32 h) {
 // From:  dcraw.c -- Dave Coffin's raw photo decoder
 #define SQR(x) ((x)*(x))
 ushort16* NefDecoder::gammaCurve(double pwr, double ts, int mode, int imax) {
-  auto *curve = (ushort16 *)_aligned_malloc(65536 * sizeof(ushort16), 16);
+  auto* curve = (ushort16*)alignedMallocArray<16, ushort16>(65536);
   if (curve == nullptr) {
     ThrowRDE("NEF Decoder: Unable to allocate gamma curve");
   }

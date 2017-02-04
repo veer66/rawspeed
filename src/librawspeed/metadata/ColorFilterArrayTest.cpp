@@ -29,7 +29,15 @@
 using namespace std;
 using namespace RawSpeed;
 
-using Bayer2x2 = std::tr1::tuple<int, int, int, int>;
+namespace RawSpeed {
+
+::std::ostream& operator<<(::std::ostream& os, const CFAColor c) {
+  return os << ColorFilterArray::colorToString(c);
+}
+
+} // namespace RawSpeed
+
+using Bayer2x2 = std::tr1::tuple<CFAColor, CFAColor, CFAColor, CFAColor>;
 
 static const iPoint2D square(2, 2);
 
@@ -54,11 +62,74 @@ TEST(ColorFilterArrayTestBasic, SetSize) {
   });
 }
 
+// FIXME: breaks, but only in msys2, with clang compiler
+TEST(ColorFilterArrayTestBasic, DISABLED_SetTooBigSize) {
+  ASSERT_ANY_THROW({
+    ColorFilterArray cfa(iPoint2D(1, 1));
+    cfa.setSize({6, 8});
+  });
+};
+
 TEST(ColorFilterArrayTestBasic, ToDcraw) {
+  ASSERT_NO_THROW({
+    ColorFilterArray cfa;
+    ASSERT_EQ(cfa.getDcrawFilter(), 1);
+  });
+
+  ASSERT_NO_THROW({
+    ColorFilterArray cfa(iPoint2D(4, 8));
+    ASSERT_EQ(cfa.getDcrawFilter(), 1);
+  });
+
+  ASSERT_NO_THROW({
+    ColorFilterArray cfa(iPoint2D(2, 10));
+    ASSERT_EQ(cfa.getDcrawFilter(), 1);
+  });
+
+  ASSERT_NO_THROW({
+    ColorFilterArray cfa(iPoint2D(2, 10));
+    ASSERT_EQ(cfa.getDcrawFilter(), 1);
+  });
+
+  ASSERT_NO_THROW({
+    ColorFilterArray cfa(iPoint2D(2, 7));
+    ASSERT_EQ(cfa.getDcrawFilter(), 1);
+  });
+
   ASSERT_NO_THROW({
     ColorFilterArray cfa(iPoint2D(6, 6));
     ASSERT_EQ(cfa.getDcrawFilter(), 9); // xtrans magic
   });
+}
+
+TEST(ColorFilterArrayTestBasic, HandlesEmptyCFA) {
+  ColorFilterArray cfa;
+
+  ASSERT_ANY_THROW({ cfa.getColorAt(0, 0); });
+
+  ASSERT_ANY_THROW({ cfa.shiftLeft(0); });
+
+  ASSERT_ANY_THROW({ cfa.shiftDown(0); });
+}
+
+TEST(ColorFilterArrayTestBasic, HandlesOutOfBounds) {
+  ColorFilterArray cfa(square);
+
+  ASSERT_ANY_THROW({ cfa.setColorAt({0, -1}, CFA_RED); });
+
+  ASSERT_ANY_THROW({ cfa.setColorAt({-1, 0}, CFA_RED); });
+
+  ASSERT_ANY_THROW({ cfa.setColorAt({-1, -1}, CFA_RED); });
+
+  ASSERT_ANY_THROW({ cfa.setColorAt({0, 2}, CFA_RED); });
+
+  ASSERT_ANY_THROW({ cfa.setColorAt({2, 0}, CFA_RED); });
+
+  ASSERT_ANY_THROW({ cfa.setColorAt({2, 2}, CFA_RED); });
+
+  ASSERT_ANY_THROW({ ColorFilterArray::colorToString((CFAColor)-1); });
+
+  ASSERT_ANY_THROW({ cfa.getDcrawFilter(); });
 }
 
 class ColorFilterArrayTest : public ::testing::TestWithParam<Bayer2x2> {
@@ -69,11 +140,17 @@ protected:
   Bayer2x2 param;
 };
 
-INSTANTIATE_TEST_CASE_P(RGBG2, ColorFilterArrayTest,
-                        testing::Combine(testing::Range(0, 4),
-                                         testing::Range(0, 4),
-                                         testing::Range(0, 4),
-                                         testing::Range(0, 4)));
+static const auto Bayer_RGB = ::testing::Values(CFA_RED, CFA_GREEN, CFA_BLUE);
+static const auto Bayer_CYGM =
+    ::testing::Values(CFA_CYAN, CFA_MAGENTA, CFA_YELLOW, CFA_FUJI_GREEN);
+
+INSTANTIATE_TEST_CASE_P(RGGB, ColorFilterArrayTest,
+                        testing::Combine(Bayer_RGB, Bayer_RGB, Bayer_RGB,
+                                         Bayer_RGB));
+
+INSTANTIATE_TEST_CASE_P(CYGM, ColorFilterArrayTest,
+                        testing::Combine(Bayer_CYGM, Bayer_CYGM, Bayer_CYGM,
+                                         Bayer_CYGM));
 
 static void setHelper(ColorFilterArray *cfa, Bayer2x2 param) {
   cfa->setCFA(square, std::tr1::get<0>(param), std::tr1::get<1>(param),
@@ -124,7 +201,46 @@ TEST_P(ColorFilterArrayTest, ToDcraw) {
   });
 }
 
-TEST_P(ColorFilterArrayTest, DcrawFilterShift1) {
+TEST_P(ColorFilterArrayTest, AsString) {
+  ASSERT_NO_THROW({
+    ColorFilterArray cfa;
+    setHelper(&cfa, param);
+    string dsc = cfa.asString();
+
+    ASSERT_GT(dsc.size(), 15);
+    ASSERT_LE(dsc.size(), 40);
+  });
+}
+
+class ColorFilterArrayShiftTest
+    : public ::testing::TestWithParam<
+          std::tr1::tuple<CFAColor, CFAColor, CFAColor, CFAColor, int, int>> {
+protected:
+  ColorFilterArrayShiftTest() = default;
+  virtual void SetUp() {
+    auto param = GetParam();
+    mat = std::make_tuple(std::tr1::get<0>(param), std::tr1::get<1>(param),
+                          std::tr1::get<2>(param), std::tr1::get<3>(param));
+    x = std::tr1::get<4>(param);
+    y = std::tr1::get<5>(param);
+  }
+
+  Bayer2x2 mat;
+  int x;
+  int y;
+};
+
+INSTANTIATE_TEST_CASE_P(RGGB, ColorFilterArrayShiftTest,
+                        testing::Combine(Bayer_RGB, Bayer_RGB, Bayer_RGB,
+                                         Bayer_RGB, testing::Range(-2, 2),
+                                         testing::Range(-2, 2)));
+
+INSTANTIATE_TEST_CASE_P(CYGM, ColorFilterArrayShiftTest,
+                        testing::Combine(Bayer_CYGM, Bayer_CYGM, Bayer_CYGM,
+                                         Bayer_CYGM, testing::Range(-2, 2),
+                                         testing::Range(-2, 2)));
+
+TEST(ColorFilterArrayTestBasic, shiftDcrawFilter) {
   uint32 bggr = 0x16161616;
   uint32 grbg = 0x61616161;
   uint32 gbrg = 0x49494949;
@@ -134,35 +250,28 @@ TEST_P(ColorFilterArrayTest, DcrawFilterShift1) {
     ASSERT_EQ(ColorFilterArray::shiftDcrawFilter(rggb, 1, 0), grbg);
     ASSERT_EQ(ColorFilterArray::shiftDcrawFilter(rggb, 0, 1), gbrg);
     ASSERT_EQ(ColorFilterArray::shiftDcrawFilter(rggb, 1, 1), bggr);
+    ASSERT_EQ(ColorFilterArray::shiftDcrawFilter(rggb, 2, 0), rggb);
     ASSERT_EQ(ColorFilterArray::shiftDcrawFilter(rggb, 0, 2), rggb);
+    ASSERT_EQ(ColorFilterArray::shiftDcrawFilter(rggb, 2, 2), rggb);
+    ASSERT_EQ(ColorFilterArray::shiftDcrawFilter(rggb, -1, 0), grbg);
+    ASSERT_EQ(ColorFilterArray::shiftDcrawFilter(rggb, 0, -1), gbrg);
+    ASSERT_EQ(ColorFilterArray::shiftDcrawFilter(rggb, -1, -1), bggr);
+    ASSERT_EQ(ColorFilterArray::shiftDcrawFilter(rggb, -2, 0), rggb);
+    ASSERT_EQ(ColorFilterArray::shiftDcrawFilter(rggb, 0, -2), rggb);
+    ASSERT_EQ(ColorFilterArray::shiftDcrawFilter(rggb, -2, -2), rggb);
   });
 }
 
-static iPoint2D shifts[] = {{0, 0}, {1, 0}, {0, 1}, {1, 1}, {0, 2}};
-
-TEST_P(ColorFilterArrayTest, DcrawFilterShift2) {
+TEST_P(ColorFilterArrayShiftTest, shiftEqualityTest) {
   ASSERT_NO_THROW({
     ColorFilterArray cfaOrig;
-    setHelper(&cfaOrig, param);
+    setHelper(&cfaOrig, mat);
     uint32 fo = cfaOrig.getDcrawFilter();
 
-    for (auto s : shifts) {
-      ColorFilterArray cfa = cfaOrig;
-      cfa.shiftLeft(s.x);
-      cfa.shiftDown(s.y);
-      uint32 f = cfa.getDcrawFilter();
-      ASSERT_EQ(f, ColorFilterArray::shiftDcrawFilter(fo, s.x, s.y));
-    }
-  });
-}
-
-TEST_P(ColorFilterArrayTest, AsString) {
-  ASSERT_NO_THROW({
-    ColorFilterArray cfa;
-    setHelper(&cfa, param);
-    string dsc = cfa.asString();
-
-    ASSERT_GT(dsc.size(), 15);
-    ASSERT_LE(dsc.size(), 32);
+    ColorFilterArray cfa = cfaOrig;
+    cfa.shiftLeft(x);
+    cfa.shiftDown(y);
+    uint32 f = cfa.getDcrawFilter();
+    ASSERT_EQ(f, ColorFilterArray::shiftDcrawFilter(fo, x, y));
   });
 }
