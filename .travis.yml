@@ -52,6 +52,6 @@ addons:
       name: "darktable-org/rawspeed"
       description: "rawspeed ${TRAVIS_COMMIT}"
     notification_email: lebedev.ri@gmail.com
-    build_command_prepend: "cov-configure --compiler $CC; mkdir $BUILD_DIR && mkdir $INSTALL_PREFIX"
+    build_command_prepend: "cov-configure --template --compiler $CC --comptype gcc; mkdir $BUILD_DIR && mkdir $INSTALL_PREFIX"
     build_command: "$SRC_DIR/.ci/ci-script.sh"
     branch_pattern: coverity_scan
