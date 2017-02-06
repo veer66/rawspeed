@@ -38,13 +38,14 @@ env:
     - INSTALL_PREFIX="$SRC_DIR/install"
     - CFLAGS="-pipe" CXXFLAGS="-pipe"
   matrix:
-    - CC=gcc-5 CXX=g++-5 TARGET=build
+    - CC=gcc-6 CXX=g++-6 TARGET=build
 
 before_install:
   - sudo add-apt-repository ppa:ubuntu-toolchain-r/test -y
   - sudo apt-get update -q
-  - sudo apt-get upgrade -q cmake g++-5 git libjpeg-dev libpugixml-dev libxml2-utils make ninja-build zlib1g-dev
+  - sudo apt-get upgrade -q cmake g++-6 git libjpeg-dev libpugixml-dev libxml2-utils make ninja-build zlib1g-dev
   - echo -n | openssl s_client -connect scan.coverity.com:443 | sed -ne '/-BEGIN CERTIFICATE-/,/-END CERTIFICATE-/p' | sudo tee -a /etc/ssl/certs/ca-
+  - cov-configure --compiler gcc-6
 
 addons:
   coverity_scan:
