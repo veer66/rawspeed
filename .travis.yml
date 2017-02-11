@@ -36,6 +36,7 @@ env:
     - BUILD_DIR="$SRC_DIR/build"
     - INSTALL_PREFIX="$SRC_DIR/install"
     - CFLAGS="-pipe" CXXFLAGS="-pipe"
+    - ECO="-DALLOW_DOWNLOADING_GOOGLETEST=ON"
   matrix:
     - CC=gcc-6 CXX=g++-6 TARGET=build
 
