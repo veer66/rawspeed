@@ -46,19 +46,19 @@ namespace RawSpeed {
 RawImage Cr2Decoder::decodeOldFormat() {
   uint32 offset = 0;
   if (mRootIFD->getEntryRecursive(CANON_RAW_DATA_OFFSET))
-    offset = mRootIFD->getEntryRecursive(CANON_RAW_DATA_OFFSET)->getInt();
+    offset = mRootIFD->getEntryRecursive(CANON_RAW_DATA_OFFSET)->getU32();
   else {
     // D2000 is oh so special...
-    vector<TiffIFD*> data = mRootIFD->getIFDsWithTag(CFAPATTERN);
-    if (data.empty() || ! data[0]->hasEntry(STRIPOFFSETS))
+    auto ifd = mRootIFD->getIFDWithTag(CFAPATTERN);
+    if (! ifd->hasEntry(STRIPOFFSETS))
       ThrowRDE("CR2 Decoder: Couldn't find offset");
 
-    offset = data[0]->getEntry(STRIPOFFSETS)->getInt();
+    offset = ifd->getEntry(STRIPOFFSETS)->getU32();
   }
 
   ByteStream b(mFile, offset+41, getHostEndianness() == big);
-  int height = b.getShort();
-  int width = b.getShort();
+  int height = b.getU16();
+  int width = b.getU16();
 
   // some old models (1D/1DS/D2000C) encode two lines as one
   // see: FIX_CANON_HALF_HEIGHT_DOUBLE_WIDTH
@@ -80,19 +80,17 @@ RawImage Cr2Decoder::decodeOldFormat() {
   // deal with D2000 GrayResponseCurve
   TiffEntry* curve = mRootIFD->getEntryRecursive((TiffTag)0x123);
   if (curve && curve->type == TIFF_SHORT && curve->count == 4096) {
-    auto* table = new ushort16[curve->count];
-    curve->getShortArray(table, curve->count);
+    auto table = curve->getU16Array(curve->count);
     if (!uncorrectedRawValues) {
-      mRaw->setTable(table, curve->count, true);
+      mRaw->setTable(table.data(), table.size(), true);
       // Apply table
       mRaw->sixteenBitLookup();
       // Delete table
       mRaw->setTable(nullptr);
     } else {
       // We want uncorrected, but we store the table.
-      mRaw->setTable(table, curve->count, false);
+      mRaw->setTable(table.data(), table.size(), false);
     }
-    delete [] table;
   }
 
   return mRaw;
@@ -104,28 +102,28 @@ RawImage Cr2Decoder::decodeNewFormat() {
   TiffEntry* sensorInfoE = mRootIFD->getEntryRecursive(CANON_SENSOR_INFO);
   if (!sensorInfoE)
     ThrowTPE("Cr2Decoder: failed to get SensorInfo from MakerNote");
-  iPoint2D dim(sensorInfoE->getShort(1), sensorInfoE->getShort(2));
+  iPoint2D dim(sensorInfoE->getU16(1), sensorInfoE->getU16(2));
 
   int componentsPerPixel = 1;
   TiffIFD* raw = mRootIFD->getSubIFDs()[3].get();
   if (raw->hasEntry(CANON_SRAWTYPE) &&
-      raw->getEntry(CANON_SRAWTYPE)->getInt() == 4)
+      raw->getEntry(CANON_SRAWTYPE)->getU32() == 4)
     componentsPerPixel = 3;
 
   mRaw = RawImage::create(dim, TYPE_USHORT16, componentsPerPixel);
 
   vector<int> s_width;
   TiffEntry* cr2SliceEntry = raw->getEntryRecursive(CANONCR2SLICE);
-  if (cr2SliceEntry && cr2SliceEntry->getShort(0) > 0) {
-    for (int i = 0; i < cr2SliceEntry->getShort(0); i++)
-      s_width.push_back(cr2SliceEntry->getShort(1));
-    s_width.push_back(cr2SliceEntry->getShort(2));
+  if (cr2SliceEntry && cr2SliceEntry->getU16(0) > 0) {
+    for (int i = 0; i < cr2SliceEntry->getU16(0); i++)
+      s_width.push_back(cr2SliceEntry->getU16(1));
+    s_width.push_back(cr2SliceEntry->getU16(2));
   }
 
   TiffEntry* offsets = raw->getEntry(STRIPOFFSETS);
   TiffEntry* counts = raw->getEntry(STRIPBYTECOUNTS);
 
-  Cr2Decompressor d(*mFile, offsets->getInt(), counts->getInt(), mRaw);
+  Cr2Decompressor d(*mFile, offsets->getU32(), counts->getU32(), mRaw);
 
   try {
     d.decode(s_width);
@@ -154,7 +152,7 @@ void Cr2Decoder::checkSupportInternal(CameraMetaData *meta) {
   // Check for sRaw mode
   if (mRootIFD->getSubIFDs().size() == 4) {
     TiffEntry* typeE = mRootIFD->getSubIFDs()[3]->getEntryRecursive(CANON_SRAWTYPE);
-    if (typeE && typeE->getInt() == 4) {
+    if (typeE && typeE->getU32() == 4) {
       checkCameraSupported(meta, id, "sRaw1");
       return;
     }
@@ -176,7 +174,7 @@ void Cr2Decoder::decodeMetaDataInternal(CameraMetaData *meta) {
     mode = "sRaw2";
 
   if (mRootIFD->hasEntryRecursive(ISOSPEEDRATINGS))
-    iso = mRootIFD->getEntryRecursive(ISOSPEEDRATINGS)->getInt();
+    iso = mRootIFD->getEntryRecursive(ISOSPEEDRATINGS)->getU32();
 
   // Fetch the white balance
   try{
@@ -192,22 +190,22 @@ void Cr2Decoder::decodeMetaDataInternal(CameraMetaData *meta) {
       }
 
       offset /= 2;
-      mRaw->metadata.wbCoeffs[0] = (float) wb->getShort(offset + 0);
-      mRaw->metadata.wbCoeffs[1] = (float) wb->getShort(offset + 1);
-      mRaw->metadata.wbCoeffs[2] = (float) wb->getShort(offset + 3);
+      mRaw->metadata.wbCoeffs[0] = (float) wb->getU16(offset + 0);
+      mRaw->metadata.wbCoeffs[1] = (float) wb->getU16(offset + 1);
+      mRaw->metadata.wbCoeffs[2] = (float) wb->getU16(offset + 3);
     } else {
       if (mRootIFD->hasEntryRecursive(CANONSHOTINFO) &&
           mRootIFD->hasEntryRecursive(CANONPOWERSHOTG9WB)) {
         TiffEntry *shot_info = mRootIFD->getEntryRecursive(CANONSHOTINFO);
         TiffEntry *g9_wb = mRootIFD->getEntryRecursive(CANONPOWERSHOTG9WB);
 
-        ushort16 wb_index = shot_info->getShort(7);
+        ushort16 wb_index = shot_info->getU16(7);
         int wb_offset = (wb_index < 18) ? "012347800000005896"[wb_index]-'0' : 0;
         wb_offset = wb_offset*8 + 2;
 
-        mRaw->metadata.wbCoeffs[0] = (float) g9_wb->getInt(wb_offset+1);
-        mRaw->metadata.wbCoeffs[1] = ((float) g9_wb->getInt(wb_offset+0) + (float) g9_wb->getInt(wb_offset+3)) / 2.0f;
-        mRaw->metadata.wbCoeffs[2] = (float) g9_wb->getInt(wb_offset+2);
+        mRaw->metadata.wbCoeffs[0] = (float) g9_wb->getU32(wb_offset+1);
+        mRaw->metadata.wbCoeffs[1] = ((float) g9_wb->getU32(wb_offset+0) + (float) g9_wb->getU32(wb_offset+3)) / 2.0f;
+        mRaw->metadata.wbCoeffs[2] = (float) g9_wb->getU32(wb_offset+2);
       } else if (mRootIFD->hasEntryRecursive((TiffTag) 0xa4)) {
         // WB for the old 1D and 1DS
         TiffEntry *wb = mRootIFD->getEntryRecursive((TiffTag) 0xa4);
@@ -232,60 +230,25 @@ int Cr2Decoder::getHue() {
   if (!mRootIFD->hasEntryRecursive((TiffTag)0x10)) {
     return 0;
   }
-  uint32 model_id = mRootIFD->getEntryRecursive((TiffTag)0x10)->getInt();
+  uint32 model_id = mRootIFD->getEntryRecursive((TiffTag)0x10)->getU32();
   if (model_id >= 0x80000281 || model_id == 0x80000218 || (hints.find("force_new_sraw_hue") != hints.end()))
     return ((mRaw->metadata.subsampling.y * mRaw->metadata.subsampling.x) - 1) >> 1;
 
   return (mRaw->metadata.subsampling.y * mRaw->metadata.subsampling.x);
 }
 
-// Interpolate and convert sRaw data.
-void Cr2Decoder::sRawInterpolate() {
-  vector<TiffIFD*> data = mRootIFD->getIFDsWithTag(CANONCOLORDATA);
-  if (data.empty())
-    ThrowRDE("CR2 sRaw: Unable to locate WB info.");
-
-  TiffEntry *wb = data[0]->getEntry(CANONCOLORDATA);
-  // Offset to sRaw coefficients used to reconstruct uncorrected RGB data.
-  uint32 offset = 78;
-
-  sraw_coeffs[0] = wb->getShort(offset+0);
-  sraw_coeffs[1] = (wb->getShort(offset+1) + wb->getShort(offset+2) + 1) >> 1;
-  sraw_coeffs[2] = wb->getShort(offset+3);
-
-  if (hints.find("invert_sraw_wb") != hints.end()) {
-    sraw_coeffs[0] = (int)(1024.0f/((float)sraw_coeffs[0]/1024.0f));
-    sraw_coeffs[2] = (int)(1024.0f/((float)sraw_coeffs[2]/1024.0f));
-  }
-
-  /* Determine sRaw coefficients */
-  bool isOldSraw = hints.find("sraw_40d") != hints.end();
-  bool isNewSraw = hints.find("sraw_new") != hints.end();
-
-  if (mRaw->metadata.subsampling.y == 1 && mRaw->metadata.subsampling.x == 2) {
-    if (isOldSraw)
-      interpolate_422_v0(mRaw->dim.x / 2, mRaw->dim.y, 0, mRaw->dim.y);
-    else if (isNewSraw)
-      interpolate_422_v2(mRaw->dim.x / 2, mRaw->dim.y, 0, mRaw->dim.y);
-    else
-      interpolate_422_v1(mRaw->dim.x / 2, mRaw->dim.y, 0, mRaw->dim.y);
-  } else if (mRaw->metadata.subsampling.y == 2 && mRaw->metadata.subsampling.x == 2) {
-    if (isNewSraw)
-      interpolate_420_v2(mRaw->dim.x / 2, mRaw->dim.y / 2, 0, mRaw->dim.y / 2);
-    else
-      interpolate_420_v1(mRaw->dim.x / 2, mRaw->dim.y / 2, 0, mRaw->dim.y / 2);
-  } else
-    ThrowRDE("CR2 Decoder: Unknown subsampling");
-}
+template <int version>
+static inline void YUV_TO_RGB(int Y, int Cb, int Cr, const int* sraw_coeffs,
+                              ushort16* X, int offset);
 
 /* sRaw interpolators - ugly as sin, but does the job in reasonably speed */
 
 // Note: Thread safe.
 
-template <typename T>
-static inline void interpolate_422(T yuv2rgb, const int* sraw_coeffs,
-                                   RawImage& mRaw, int hue, int hue_last, int w,
-                                   int h, int start_h, int end_h) {
+template <int version>
+static inline void interpolate_422(const int* sraw_coeffs, RawImage& mRaw,
+                                   int hue, int hue_last, int w, int h,
+                                   int start_h, int end_h) {
   // Last pixel should not be interpolated
   w--;
 
@@ -299,31 +262,31 @@ static inline void interpolate_422(T yuv2rgb, const int* sraw_coeffs,
       int Y = c_line[off];
       int Cb = c_line[off+1] - hue;
       int Cr = c_line[off+2] - hue;
-      yuv2rgb(Y, Cb, Cr, sraw_coeffs, c_line, off);
+      YUV_TO_RGB<version>(Y, Cb, Cr, sraw_coeffs, c_line, off);
       off += 3;
 
       Y = c_line[off];
       int Cb2 = (Cb + c_line[off+1+3] - hue) >> 1;
       int Cr2 = (Cr + c_line[off+2+3] - hue) >> 1;
-      yuv2rgb(Y, Cb2, Cr2, sraw_coeffs, c_line, off);
+      YUV_TO_RGB<version>(Y, Cb2, Cr2, sraw_coeffs, c_line, off);
       off += 3;
     }
     // Last two pixels
     int Y = c_line[off];
     int Cb = c_line[off + 1] - hue_last;
     int Cr = c_line[off + 2] - hue_last;
-    yuv2rgb(Y, Cb, Cr, sraw_coeffs, c_line, off);
+    YUV_TO_RGB<version>(Y, Cb, Cr, sraw_coeffs, c_line, off);
 
     Y = c_line[off+3];
-    yuv2rgb(Y, Cb, Cr, sraw_coeffs, c_line, off + 3);
+    YUV_TO_RGB<version>(Y, Cb, Cr, sraw_coeffs, c_line, off + 3);
   }
 }
 
 // Note: Not thread safe, since it writes inplace.
-template <typename T>
-static inline void interpolate_420(T yuv2rgb, const int* sraw_coeffs,
-                                   RawImage& mRaw, int hue, int w, int h,
-                                   int start_h, int end_h) {
+template <int version>
+static inline void interpolate_420(const int* sraw_coeffs, RawImage& mRaw,
+                                   int hue, int w, int h, int start_h,
+                                   int end_h) {
   // Last pixel should not be interpolated
   w--;
 
@@ -352,41 +315,41 @@ static inline void interpolate_420(T yuv2rgb, const int* sraw_coeffs,
       int Y = c_line[off];
       int Cb = c_line[off+1] - hue;
       int Cr = c_line[off+2] - hue;
-      yuv2rgb(Y, Cb, Cr, sraw_coeffs, c_line, off);
+      YUV_TO_RGB<version>(Y, Cb, Cr, sraw_coeffs, c_line, off);
 
       Y = c_line[off+3];
       int Cb2 = (Cb + c_line[off+1+6] - hue) >> 1;
       int Cr2 = (Cr + c_line[off+2+6] - hue) >> 1;
-      yuv2rgb(Y, Cb2, Cr2, sraw_coeffs, c_line, off + 3);
+      YUV_TO_RGB<version>(Y, Cb2, Cr2, sraw_coeffs, c_line, off + 3);
 
       // Next line
       Y = n_line[off];
       int Cb3 = (Cb + nn_line[off+1] - hue) >> 1;
       int Cr3 = (Cr + nn_line[off+2] - hue) >> 1;
-      yuv2rgb(Y, Cb3, Cr3, sraw_coeffs, n_line, off);
+      YUV_TO_RGB<version>(Y, Cb3, Cr3, sraw_coeffs, n_line, off);
 
       Y = n_line[off+3];
       Cb = (Cb + Cb2 + Cb3 + nn_line[off+1+6] - hue) >> 2;  //Left + Above + Right +Below
       Cr = (Cr + Cr2 + Cr3 + nn_line[off+2+6] - hue) >> 2;
-      yuv2rgb(Y, Cb, Cr, sraw_coeffs, n_line, off + 3);
+      YUV_TO_RGB<version>(Y, Cb, Cr, sraw_coeffs, n_line, off + 3);
       off += 6;
     }
     int Y = c_line[off];
     int Cb = c_line[off+1] - hue;
     int Cr = c_line[off+2] - hue;
-    yuv2rgb(Y, Cb, Cr, sraw_coeffs, c_line, off);
+    YUV_TO_RGB<version>(Y, Cb, Cr, sraw_coeffs, c_line, off);
 
     Y = c_line[off+3];
-    yuv2rgb(Y, Cb, Cr, sraw_coeffs, c_line, off + 3);
+    YUV_TO_RGB<version>(Y, Cb, Cr, sraw_coeffs, c_line, off + 3);
 
     // Next line
     Y = n_line[off];
     Cb = (Cb + nn_line[off+1] - hue) >> 1;
     Cr = (Cr + nn_line[off+2] - hue) >> 1;
-    yuv2rgb(Y, Cb, Cr, sraw_coeffs, n_line, off);
+    YUV_TO_RGB<version>(Y, Cb, Cr, sraw_coeffs, n_line, off);
 
     Y = n_line[off+3];
-    yuv2rgb(Y, Cb, Cr, sraw_coeffs, n_line, off + 3);
+    YUV_TO_RGB<version>(Y, Cb, Cr, sraw_coeffs, n_line, off + 3);
   }
 
   if (atLastLine) {
@@ -399,20 +362,34 @@ static inline void interpolate_420(T yuv2rgb, const int* sraw_coeffs,
       int Y = c_line[off];
       int Cb = c_line[off+1] - hue;
       int Cr = c_line[off+2] - hue;
-      yuv2rgb(Y, Cb, Cr, sraw_coeffs, c_line, off);
+      YUV_TO_RGB<version>(Y, Cb, Cr, sraw_coeffs, c_line, off);
 
       Y = c_line[off+3];
-      yuv2rgb(Y, Cb, Cr, sraw_coeffs, c_line, off + 3);
+      YUV_TO_RGB<version>(Y, Cb, Cr, sraw_coeffs, c_line, off + 3);
 
       // Next line
       Y = n_line[off];
-      yuv2rgb(Y, Cb, Cr, sraw_coeffs, n_line, off);
+      YUV_TO_RGB<version>(Y, Cb, Cr, sraw_coeffs, n_line, off);
 
       Y = n_line[off+3];
-      yuv2rgb(Y, Cb, Cr, sraw_coeffs, n_line, off + 3);
+      YUV_TO_RGB<version>(Y, Cb, Cr, sraw_coeffs, n_line, off + 3);
       off += 6;
     }
   }
+}
+
+template <int version>
+static void interpolate_422(int hue, RawImage& mRaw, int* sraw_coeffs, int w,
+                            int h, int start_h, int end_h) {
+  hue = -hue + 16384;
+  interpolate_422<version>(sraw_coeffs, mRaw, hue, hue, w, h, start_h, end_h);
+}
+
+template <int version>
+static void interpolate_420(int hue, RawImage& mRaw, int* sraw_coeffs, int w,
+                            int h, int start_h, int end_h) {
+  hue = -hue + 16384;
+  interpolate_420<version>(sraw_coeffs, mRaw, hue, w, h, start_h, end_h);
 }
 
 static inline void STORE_RGB(ushort16* X, int r, int g, int b, int offset) {
@@ -421,8 +398,9 @@ static inline void STORE_RGB(ushort16* X, int r, int g, int b, int offset) {
   X[offset + 2] = clampBits(b >> 8, 16);
 }
 
-static inline void YUV_TO_RGB_v1(int Y, int Cb, int Cr, const int* sraw_coeffs,
-                                 ushort16* X, int offset) {
+template </* int version */>
+inline void YUV_TO_RGB<1>(int Y, int Cb, int Cr, const int* sraw_coeffs,
+                          ushort16* X, int offset) {
   int r, g, b;
   r = sraw_coeffs[0] * (Y + ((50 * Cb + 22929 * Cr) >> 12));
   g = sraw_coeffs[1] * (Y + ((-5640 * Cb - 11751 * Cr) >> 12));
@@ -430,20 +408,10 @@ static inline void YUV_TO_RGB_v1(int Y, int Cb, int Cr, const int* sraw_coeffs,
   STORE_RGB(X, r, g, b, offset);
 }
 
-void Cr2Decoder::interpolate_422_v1(int w, int h, int start_h, int end_h) {
-  auto hue = -getHue() + 16384;
-  interpolate_422(YUV_TO_RGB_v1, sraw_coeffs, mRaw, hue, hue, w, h, start_h,
-                  end_h);
-}
-
-void Cr2Decoder::interpolate_420_v1(int w, int h, int start_h, int end_h) {
-  auto hue = -getHue() + 16384;
-  interpolate_420(YUV_TO_RGB_v1, sraw_coeffs, mRaw, hue, w, h, start_h, end_h);
-}
-
+template </* int version */>
 /* Algorithm found in EOS 40D */
-static inline void YUV_TO_RGB_v0(int Y, int Cb, int Cr, const int* sraw_coeffs,
-                                 ushort16* X, int offset) {
+inline void YUV_TO_RGB<0>(int Y, int Cb, int Cr, const int* sraw_coeffs,
+                          ushort16* X, int offset) {
   int r, g, b;
   r = sraw_coeffs[0] * (Y + Cr - 512);
   g = sraw_coeffs[1] * (Y + ((-778 * Cb - (Cr << 11)) >> 12) - 512);
@@ -451,16 +419,18 @@ static inline void YUV_TO_RGB_v0(int Y, int Cb, int Cr, const int* sraw_coeffs,
   STORE_RGB(X, r, g, b, offset);
 }
 
-void Cr2Decoder::interpolate_422_v0(int w, int h, int start_h, int end_h) {
-  auto hue = -getHue() + 16384;
+template </* int version */>
+void interpolate_422<0>(int hue, RawImage& mRaw, int* sraw_coeffs, int w, int h,
+                        int start_h, int end_h) {
+  hue = -hue + 16384;
   auto hue_last = 16384;
-  interpolate_422(YUV_TO_RGB_v0, sraw_coeffs, mRaw, hue, hue_last, w, h,
-                  start_h, end_h);
+  interpolate_422<0>(sraw_coeffs, mRaw, hue, hue_last, w, h, start_h, end_h);
 }
 
+template </* int version */>
 /* Algorithm found in EOS 5d Mk III */
-static inline void YUV_TO_RGB_v2(int Y, int Cb, int Cr, const int* sraw_coeffs,
-                                 ushort16* X, int offset) {
+inline void YUV_TO_RGB<2>(int Y, int Cb, int Cr, const int* sraw_coeffs,
+                          ushort16* X, int offset) {
   int r, g, b;
   r = sraw_coeffs[0] * (Y + Cr);
   g = sraw_coeffs[1] * (Y + ((-778 * Cb - (Cr << 11)) >> 12));
@@ -468,15 +438,50 @@ static inline void YUV_TO_RGB_v2(int Y, int Cb, int Cr, const int* sraw_coeffs,
   STORE_RGB(X, r, g, b, offset);
 }
 
-void Cr2Decoder::interpolate_422_v2(int w, int h, int start_h, int end_h) {
-  auto hue = -getHue() + 16384;
-  interpolate_422(YUV_TO_RGB_v2, sraw_coeffs, mRaw, hue, hue, w, h, start_h,
-                  end_h);
-}
+// Interpolate and convert sRaw data.
+void Cr2Decoder::sRawInterpolate() {
+  vector<const TiffIFD*> data = mRootIFD->getIFDsWithTag(CANONCOLORDATA);
+  if (data.empty())
+    ThrowRDE("CR2 sRaw: Unable to locate WB info.");
 
-void Cr2Decoder::interpolate_420_v2(int w, int h, int start_h, int end_h) {
-  auto hue = -getHue() + 16384;
-  interpolate_420(YUV_TO_RGB_v2, sraw_coeffs, mRaw, hue, w, h, start_h, end_h);
+  TiffEntry* wb = data[0]->getEntry(CANONCOLORDATA);
+  // Offset to sRaw coefficients used to reconstruct uncorrected RGB data.
+  uint32 offset = 78;
+
+  int sraw_coeffs[3];
+  sraw_coeffs[0] = wb->getU16(offset + 0);
+  sraw_coeffs[1] =
+      (wb->getU16(offset + 1) + wb->getU16(offset + 2) + 1) >> 1;
+  sraw_coeffs[2] = wb->getU16(offset + 3);
+
+  if (hints.find("invert_sraw_wb") != hints.end()) {
+    sraw_coeffs[0] = (int)(1024.0f / ((float)sraw_coeffs[0] / 1024.0f));
+    sraw_coeffs[2] = (int)(1024.0f / ((float)sraw_coeffs[2] / 1024.0f));
+  }
+
+  /* Determine sRaw coefficients */
+  bool isOldSraw = hints.find("sraw_40d") != hints.end();
+  bool isNewSraw = hints.find("sraw_new") != hints.end();
+
+  const auto& subSampling = mRaw->metadata.subsampling;
+  int width = mRaw->dim.x / subSampling.x;
+  int height = mRaw->dim.y / subSampling.y;
+
+  if (subSampling.y == 1 && subSampling.x == 2) {
+    if (isOldSraw)
+      interpolate_422<0>(getHue(), mRaw, sraw_coeffs, width, height, 0, height);
+    else if (isNewSraw)
+      interpolate_422<2>(getHue(), mRaw, sraw_coeffs, width, height, 0, height);
+    else
+      interpolate_422<1>(getHue(), mRaw, sraw_coeffs, width, height, 0, height);
+  } else if (subSampling.y == 2 && subSampling.x == 2) {
+    if (isNewSraw)
+      interpolate_420<2>(getHue(), mRaw, sraw_coeffs, width, height, 0, height);
+    else
+      interpolate_420<1>(getHue(), mRaw, sraw_coeffs, width, height, 0, height);
+  } else
+    ThrowRDE("CR2 Decoder: Unknown subsampling: (%i; %i)", subSampling.x,
+             subSampling.y);
 }
 
 } // namespace RawSpeed

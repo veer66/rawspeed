@@ -21,7 +21,6 @@ os:
 
 dist: trusty # *sigh*
 group: unstable
-
 sudo: required
 
 branches:

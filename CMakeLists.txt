@@ -13,7 +13,12 @@ endif(CMAKE_SOURCE_DIR STREQUAL CMAKE_BINARY_DIR)
 
 include(GNUInstallDirs)
 
-project(rawspeed CXX C)
+if(NOT (CMAKE_VERSION VERSION_LESS 3.4.0-rc1))
+  project(rawspeed CXX)
+else()
+  # FindThreads.cmake issue
+  project(rawspeed CXX C)
+endif()
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${PROJECT_SOURCE_DIR}/cmake/Modules/")
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${PROJECT_SOURCE_DIR}/cmake/")
@@ -22,16 +27,37 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
+set(INTERPROCEDURAL_OPTIMIZATION ON)
+
 option(BINARY_PACKAGE_BUILD "Sets march optimization to generic" OFF)
 option(WITH_PTHREADS "Enable threading support through pthread. Highly recommended" ON)
 option(WITH_OPENMP "Enable OpenMP support. Only used for tools, not the library itself." ON)
+set(WITH_PUGIXML ON CACHE BOOL "Enable XML support for cameras.xml reading" FORCE)
+if(WITH_PUGIXML)
+  option(USE_BUNDLED_PUGIXML "Build and use pugixml in-tree" OFF)
+else()
+  set(USE_BUNDLED_PUGIXML OFF CACHE BOOL "Build and use pugixml in-tree" FORCE)
+endif()
 option(WITH_JPEG "Enable JPEG support for DNG Lossy JPEG support" ON)
 option(WITH_ZLIB "Enable ZLIB support for DNG deflate support" ON)
+if(WITH_ZLIB)
+  option(USE_BUNDLED_ZLIB "Build and use zlib in-tree" OFF)
+else()
+  set(USE_BUNDLED_ZLIB OFF CACHE BOOL "Build and use zlib in-tree" FORCE)
+endif()
 option(USE_XMLLINT "Run xmllint to test if data/cameras.xml is valid" ON)
 option(USE_IWYU "Run iwyu tool when compiling sources" OFF)
 option(USE_CLANG_TIDY "Run clang-tidy tool when compiling sources" OFF)
 option(BUILD_TESTING "Build the testing tree." ON)
+if(BUILD_TESTING)
+  option(ALLOW_DOWNLOADING_GOOGLETEST "If googletest src tree is not found in location specified by GOOGLETEST_PATH, do fetch the archive from internet" OFF)
+else()
+  set(ALLOW_DOWNLOADING_GOOGLETEST OFF CACHE BOOL "If googletest src tree is not found in location specified by GOOGLETEST_PATH, do fetch the archive from internet" FORCE)
+endif()
 option(BUILD_TOOLS "Build some tools (identify, rstest)." ON)
+
+set(GOOGLETEST_PATH "/usr/src/googletest" CACHE PATH
+                    "Path to the googletest root tree. Should contain googletest and googlemock subdirs. And CMakeLists.txt in root, and in both of these subdirs")
 
 # Add a sensible build type default and warning because empty means no optimization and no debug info.
 if(NOT CMAKE_BUILD_TYPE)
@@ -68,6 +94,7 @@ include(compiler-flags)
 include(compiler-warnings)
 
 add_custom_target(check ALL)
+add_custom_target(dependencies ALL)
 
 add_subdirectory(src)
 add_subdirectory(data)

@@ -1,4 +1,6 @@
 FILE(GLOB DECODER_SOURCES
+  "AbstractTiffDecoder.cpp"
+  "AbstractTiffDecoder.h"
   "AriDecoder.cpp"
   "AriDecoder.h"
   "ArwDecoder.cpp"
@@ -37,7 +39,6 @@ FILE(GLOB DECODER_SOURCES
   "RafDecoder.h"
   "RawDecoder.cpp"
   "RawDecoder.h"
-  "RawDecoderException.cpp"
   "RawDecoderException.h"
   "Rw2Decoder.cpp"
   "Rw2Decoder.h"

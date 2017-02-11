@@ -5,8 +5,8 @@ project(googletest NONE)
 # Download and unpack googletest at configure time
 configure_file(${CMAKE_SOURCE_DIR}/cmake/Modules/GoogleTest.cmake.in ${CMAKE_BINARY_DIR}/googletest/CMakeLists.txt @ONLY)
 
-execute_process(
-  COMMAND ${CMAKE_COMMAND} -G "${CMAKE_GENERATOR}" .
+execute_process(COMMAND ${CMAKE_COMMAND} -G "${CMAKE_GENERATOR}"
+  -DALLOW_DOWNLOADING_GOOGLETEST=${ALLOW_DOWNLOADING_GOOGLETEST} -DGOOGLETEST_PATH:PATH=${GOOGLETEST_PATH} .
   RESULT_VARIABLE result
   WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/googletest
 )
@@ -24,6 +24,10 @@ execute_process(
 if(result)
   message(FATAL_ERROR "Build step for googletest failed: ${result}")
 endif()
+
+# shared googletest exibits varous spririous failures.
+# let's insist on static library.
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 
 # Prevent overriding the parent project's compiler/linker
 # settings on Windows
@@ -48,7 +52,8 @@ unset(CMAKE_CXX_INCLUDE_WHAT_YOU_USE)
 # Add googletest directly to our build. This defines
 # the gtest and gtest_main targets.
 add_subdirectory(${CMAKE_BINARY_DIR}/googletest/googletest-src
-                 ${CMAKE_BINARY_DIR}/googletest/googletest-build)
+                 ${CMAKE_BINARY_DIR}/googletest/googletest-build
+                 EXCLUDE_FROM_ALL)
 
 set_target_properties(gtest PROPERTIES INTERFACE_SYSTEM_INCLUDE_DIRECTORIES $<TARGET_PROPERTY:gtest,INTERFACE_INCLUDE_DIRECTORIES>)
 set_target_properties(gtest_main PROPERTIES INTERFACE_SYSTEM_INCLUDE_DIRECTORIES $<TARGET_PROPERTY:gtest_main,INTERFACE_INCLUDE_DIRECTORIES>)
