@@ -18,6 +18,7 @@
     Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
 */
 
+#include "rawspeedconfig.h"
 #include "decoders/DngDecoderSlices.h"
 #include "common/Common.h"                          // for uint32, getThrea...
 #include "common/Point.h"                           // for iPoint2D
@@ -26,13 +27,16 @@
 #include "decompressors/JpegDecompressor.h"         // for JpegDecompressor
 #include "decompressors/LJpegDecompressor.h"        // for LJpegDecompressor
 #include "decompressors/UncompressedDecompressor.h" // for UncompressedDeco...
+#include "io/Endianness.h"                          // for Endianness::big
 #include "io/IOException.h"                         // for IOException
 #include "tiff/TiffEntry.h"                         // IWYU pragma: keep
 #include "tiff/TiffIFD.h"                           // for getTiffEndianness
+#include <algorithm>                                // for move
 #include <cstdio>                                   // for size_t
 #include <exception>                                // for exception
-#include <string>                                   // for allocator, string
-#include <vector>                                   // for vector
+#include <memory>                                   // for allocator_traits...
+#include <string>                                   // for string, operator+
+#include <vector>                                   // for allocator, vector
 
 using namespace std;
 
@@ -44,10 +48,8 @@ void *DecodeThread(void *_this) {
   try {
     parent->decodeSlice(me);
   } catch (const std::exception &exc) {
-    parent->mRaw->setError(
-        string(string("DNGDEcodeThread: Caught exception: ") +
-               string(exc.what()))
-            .c_str());
+    parent->mRaw->setError(string(
+        string("DNGDEcodeThread: Caught exception: ") + string(exc.what())));
   } catch (...) {
     parent->mRaw->setError("DNGDEcodeThread: Caught unhandled exception.");
   }
@@ -61,20 +63,17 @@ DngDecoderSlices::DngDecoderSlices(FileMap *file, const RawImage &img,
   compression = _compression;
 }
 
-DngDecoderSlices::~DngDecoderSlices() = default;
-
 void DngDecoderSlices::addSlice(const DngSliceElement &slice) {
   slices.push(slice);
 }
 
 void DngDecoderSlices::startDecoding() {
-#ifdef NO_PTHREAD
-  DngDecoderThread t;
+#ifndef HAVE_PTHREAD
+  DngDecoderThread t(this);
   while (!slices.empty()) {
     t.slices.push(slices.front());
     slices.pop();
   }
-  t.parent = this;
   DecodeThread(&t);
 #else
   // Create threads
@@ -88,24 +87,23 @@ void DngDecoderSlices::startDecoding() {
   pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
 
   for (uint32 i = 0; i < nThreads; i++) {
-    auto *t = new DngDecoderThread();
+    auto t = make_unique<DngDecoderThread>(this);
     for (int j = 0; j < slicesPerThread ; j++) {
       if (!slices.empty()) {
         t->slices.push(slices.front());
         slices.pop();
       }
     }
-    t->parent = this;
-    pthread_create(&t->threadid, &attr, DecodeThread, t);
-    threads.push_back(t);
+    pthread_create(&t->threadid, &attr, DecodeThread, t.get());
+    threads.push_back(move(t));
   }
   pthread_attr_destroy(&attr);
 
   void *status;
-  for (uint32 i = 0; i < nThreads; i++) {
-    pthread_join(threads[i]->threadid, &status);
-    delete(threads[i]);
+  for (auto& thread : threads) {
+    pthread_join(thread->threadid, &status);
   }
+  threads.clear();
 #endif
 }
 
@@ -176,7 +174,7 @@ void DngDecoderSlices::decodeSlice(DngDecoderThread* t) {
 #else
 #pragma message                                                                \
     "ZLIB is not present! Deflate compression will not be supported!"
-    ThrowRDE("DngDecoderSlices: deflate support is disabled.");
+    ThrowRDE("deflate support is disabled.");
 #endif
     /* Lossy DNG */
   } else if (compression == 0x884c) {
@@ -196,14 +194,14 @@ void DngDecoderSlices::decodeSlice(DngDecoderThread* t) {
     }
 #else
 #pragma message "JPEG is not present! Lossy JPEG DNG will not be supported!"
-    ThrowRDE("DngDecoderSlices: jpeg support is disabled.");
+    ThrowRDE("jpeg support is disabled.");
 #endif
   }
   else
     mRaw->setError("DngDecoderSlices: Unknown compression");
 }
 
-int DngDecoderSlices::size() {
+int __attribute__((pure)) DngDecoderSlices::size() {
   return (int)slices.size();
 }
 

@@ -23,8 +23,10 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
 #include "common/Memory.h"                // for alignedFree, alignedMalloc...
 #include "common/Point.h"                 // for iPoint2D, iRectangle2D
 #include "decoders/RawDecoderException.h" // for ThrowRDE
+#include "decompressors/HuffmanTable.h"   // for HuffmanTable::signExtend
 #include "io/Buffer.h"                    // for Buffer::size_type
 #include "io/ByteStream.h"                // for ByteStream
+#include "io/Endianness.h"                // for getHostEndianness, Endiann...
 #include "parsers/TiffParser.h"           // for parseTiff
 #include "tiff/TiffEntry.h"               // IWYU pragma: keep
 #include "tiff/TiffIFD.h"                 // for TiffID, TiffRootIFD, TiffR...
@@ -41,9 +43,7 @@ using namespace std;
 
 namespace RawSpeed {
 
-X3fDecoder::X3fDecoder(FileMap *file) : RawDecoder(file), bytes(nullptr) {
-  huge_table = nullptr;
-  line_offsets = nullptr;
+X3fDecoder::X3fDecoder(FileMap *file) : RawDecoder(file) {
   bytes = new ByteStream(file, 0, getHostEndianness() == little);
 }
 
@@ -80,8 +80,7 @@ RawImage X3fDecoder::decodeRawInternal()
   return mRaw;
 }
 
-void X3fDecoder::decodeMetaDataInternal( CameraMetaData *meta )
-{
+void X3fDecoder::decodeMetaDataInternal(const CameraMetaData* meta) {
   if (readName()) {
     if (checkCameraSupported(meta, camera_make, camera_model, "" )) {
       int iso = 0;
@@ -139,11 +138,10 @@ bool X3fDecoder::readName() {
   return false;
 }
 
-void X3fDecoder::checkSupportInternal( CameraMetaData *meta )
-{
+void X3fDecoder::checkSupportInternal(const CameraMetaData* meta) {
   if (readName()) {
     if (!checkCameraSupported(meta, camera_make, camera_model, "" ))
-      ThrowRDE("X3FDecoder: Unknown camera. Will not guess.");
+      ThrowRDE("Unknown camera. Will not guess.");
     return;
   }
 
@@ -157,7 +155,7 @@ void X3fDecoder::checkSupportInternal( CameraMetaData *meta )
         return;
     }
   }
-  ThrowRDE("X3F Decoder: Unable to determine camera name.");
+  ThrowRDE("Unable to determine camera name.");
 }
 
 string X3fDecoder::getProp(const char* key )
@@ -212,7 +210,7 @@ void X3fDecoder::decompressSigma( X3fImage &image )
       if (i != 2) {
         plane_offset[i + 1] = plane_offset[i] + roundUp(plane_sizes[i], 16);
         if (plane_offset[i]>mFile->getSize())
-          ThrowRDE("SigmaDecompressor:Plane offset outside image");
+          ThrowRDE("Plane offset outside image");
       }
     }
     mRaw->clearArea(iRectangle2D(0,0,image.width,image.height));
@@ -268,14 +266,14 @@ void X3fDecoder::decompressSigma( X3fImage &image )
       max_len = max(max_len, val>>27);
     }
     if (max_len>26)
-      ThrowRDE("SigmaDecompressor: Codelength cannot be longer than 26, invalid data");
+      ThrowRDE("Codelength cannot be longer than 26, invalid data");
 
     //We create a HUGE table that contains all values up to the
     //maximum code length. Luckily values can only be up to 10
     //bits, so we can get away with using 2 bytes/value
     huge_table = (ushort16*)alignedMallocArray<16, ushort16>(1UL << max_len);
     if (!huge_table)
-      ThrowRDE("SigmaDecompressor: Memory Allocation failed.");
+      ThrowRDE("Memory Allocation failed.");
 
     memset(huge_table, 0xff, (1UL << max_len) * 2);
     for (int i = 0; i < 1024; i++) {
@@ -293,14 +291,14 @@ void X3fDecoder::decompressSigma( X3fImage &image )
     ByteStream i2(mFile, image.dataOffset+image.dataSize-mRaw->dim.y*4, (ByteStream::size_type)mRaw->dim.y*4);
     line_offsets = (uint32*)alignedMallocArray<16, uint32>(mRaw->dim.y);
     if (!line_offsets)
-      ThrowRDE("SigmaDecompressor: Memory Allocation failed.");
+      ThrowRDE("Memory Allocation failed.");
     for (int y = 0; y < mRaw->dim.y; y++) {
       line_offsets[y] = i2.getU32() + input.getPosition() + image.dataOffset;
     }
     startThreads();
     return;
   }
-  ThrowRDE("X3fDecoder: Unable to find decoder for format: %d", image.format);
+  ThrowRDE("Unable to find decoder for format: %d", image.format);
 }
 
 void X3fDecoder::createSigmaTable(ByteStream *bytes_, int codes) {
@@ -311,7 +309,7 @@ void X3fDecoder::createSigmaTable(ByteStream *bytes_, int codes) {
     uint32 len = bytes_->getByte();
     uint32 code = bytes_->getByte();
     if (len > 8)
-      ThrowRDE("X3fDecoder: bit length longer than 8");
+      ThrowRDE("bit length longer than 8");
     uint32 rem_bits = 8-len;
     for (int j = 0; j < (1<<rem_bits); j++)
       code_table[code|j] = (i << 4) | len;
@@ -331,8 +329,7 @@ void X3fDecoder::createSigmaTable(ByteStream *bytes_, int codes) {
       if (code_bits + val_bits < 14) {
         uint32 low_pos = 14-code_bits-val_bits;
         int v = (int)(i>>low_pos)&((1<<val_bits) - 1);
-        if ((v & (1 << (val_bits - 1))) == 0)
-          v -= (1 << val_bits) - 1;
+        v = HuffmanTable::signExtended(v, val_bits);
         big_table[i] = (v<<8) | (code_bits+val_bits);
       } else {
         big_table[i] = 0xf;
@@ -347,8 +344,7 @@ void X3fDecoder::decodeThreaded( RawDecoderThread* t )
 {
   if (curr_image->format == 30 || curr_image->format == 35) {
     uint32 i = t->taskNo;
-    if (i>3)
-      ThrowRDE("X3fDecoder:Invalid plane:%u (internal error)", i);
+    assert(i < 3); // see startTasks above
 
     // Subsampling (in shifts)
     int subs = 0;
@@ -407,7 +403,7 @@ void X3fDecoder::decodeThreaded( RawDecoderThread* t )
           ushort16 val = huge_table[bits.peekBits(max_len)];
           uchar8 nbits = val&31;
           if (val == 0xffff) {
-            ThrowRDE("SigmaDecompressor: Invalid Huffman value. Image Corrupt");
+            ThrowRDE("Invalid Huffman value. Image Corrupt");
           }
           bits.skipBitsNoFill(nbits);
           i += curve[(val >> 5)];
@@ -431,7 +427,7 @@ void X3fDecoder::SigmaSkipOne(BitPumpMSB *bits) {
   }
   uchar8 val = code_table[code>>6];
   if (val == 0xff)
-    ThrowRDE("X3fDecoder: Invalid Huffman code");
+    ThrowRDE("Invalid Huffman code");
 
   uint32 code_bits = val&0xf;
   uint32 val_bits = val>>4;
@@ -451,7 +447,7 @@ int X3fDecoder::SigmaDecode(BitPumpMSB *bits) {
   }
   uchar8 val = code_table[code>>6];
   if (val == 0xff)
-    ThrowRDE("X3fDecoder: Invalid Huffman code");
+    ThrowRDE("Invalid Huffman code");
 
   uint32 code_bits = val&0xf;
   uint32 val_bits = val>>4;
@@ -459,8 +455,7 @@ int X3fDecoder::SigmaDecode(BitPumpMSB *bits) {
   if (!val_bits)
     return 0;
   int v = bits->getBitsNoFill(val_bits);
-  if ((v & (1 << (val_bits - 1))) == 0)
-    v -= (1 << val_bits) - 1;
+  v = HuffmanTable::signExtended(v, val_bits);
 
   return v;
 }

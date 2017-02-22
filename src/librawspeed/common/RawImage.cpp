@@ -18,6 +18,8 @@
     Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
 */
 
+#include "rawspeedconfig.h"
+
 #include "common/RawImage.h"
 #include "common/Memory.h"                // for alignedFree, alignedMalloc...
 #include "decoders/RawDecoderException.h" // for ThrowRDE, RawDecoderException
@@ -33,22 +35,17 @@ using namespace std;
 
 namespace RawSpeed {
 
-RawImageData::RawImageData()
-    : dim(0, 0), cfa(iPoint2D(0, 0)), uncropped_dim(0, 0) {
-  blackLevelSeparate[0] = blackLevelSeparate[1] = blackLevelSeparate[2] = blackLevelSeparate[3] = -1;
+RawImageData::RawImageData() : cfa(iPoint2D(0, 0)) {
+  fill_n(blackLevelSeparate, 4, -1);
   pthread_mutex_init(&mymutex, nullptr);
-  mBadPixelMap = nullptr;
   pthread_mutex_init(&errMutex, nullptr);
   pthread_mutex_init(&mBadPixelMutex, nullptr);
-  mDitherScale = true;
 }
 
-RawImageData::RawImageData(const iPoint2D &_dim, uint32 _bpc, uint32 _cpp)
-    : dim(_dim), isCFA(_cpp == 1), cfa(iPoint2D(0, 0)), dataRefCount(0),
-      data(nullptr), cpp(_cpp), bpp(_bpc * _cpp), uncropped_dim(0, 0) {
-  blackLevelSeparate[0] = blackLevelSeparate[1] = blackLevelSeparate[2] = blackLevelSeparate[3] = -1;
-  mBadPixelMap = nullptr;
-  mDitherScale = true;
+RawImageData::RawImageData(const iPoint2D& _dim, uint32 _bpc, uint32 _cpp)
+    : dim(_dim), isCFA(_cpp == 1), cfa(iPoint2D(0, 0)), cpp(_cpp),
+      bpp(_bpc * _cpp) {
+  fill_n(blackLevelSeparate, 4, -1);
   createData();
   pthread_mutex_init(&mymutex, nullptr);
   pthread_mutex_init(&errMutex, nullptr);
@@ -60,10 +57,7 @@ ImageMetaData::ImageMetaData() {
   isoSpeed = 0;
   pixelAspectRatio = 1;
   fujiRotationPos = 0;
-  wbCoeffs[0] = NAN;
-  wbCoeffs[1] = NAN;
-  wbCoeffs[2] = NAN;
-  wbCoeffs[3] = NAN;
+  fill_n(wbCoeffs, 4, NAN);
 }
 
 RawImageData::~RawImageData() {
@@ -72,9 +66,6 @@ RawImageData::~RawImageData() {
   pthread_mutex_destroy(&mymutex);
   pthread_mutex_destroy(&errMutex);
   pthread_mutex_destroy(&mBadPixelMutex);
-  for (auto &error : errors) {
-    free((void *)error);
-  }
   if (table != nullptr) {
     delete table;
   }
@@ -85,15 +76,15 @@ RawImageData::~RawImageData() {
 
 void RawImageData::createData() {
   if (dim.x > 65535 || dim.y > 65535)
-    ThrowRDE("RawImageData: Dimensions too large for allocation.");
+    ThrowRDE("Dimensions too large for allocation.");
   if (dim.x <= 0 || dim.y <= 0)
-    ThrowRDE("RawImageData: Dimension of one sides is less than 1 - cannot allocate image.");
+    ThrowRDE("Dimension of one sides is less than 1 - cannot allocate image.");
   if (data)
-    ThrowRDE("RawImageData: Duplicate data allocation in createData.");
+    ThrowRDE("Duplicate data allocation in createData.");
   pitch = roundUp((size_t)dim.x * bpp, 16);
   data = (uchar8*)alignedMallocArray<16>(dim.y, pitch);
   if (!data)
-    ThrowRDE("RawImageData::createData: Memory Allocation failed.");
+    ThrowRDE("Memory Allocation failed.");
   uncropped_dim = dim;
 }
 
@@ -108,9 +99,11 @@ void RawImageData::destroyData() {
 
 void RawImageData::setCpp(uint32 val) {
   if (data)
-    ThrowRDE("RawImageData: Attempted to set Components per pixel after data allocation");
+    ThrowRDE("Attempted to set Components per pixel after data allocation");
   if (val > 4)
-    ThrowRDE("RawImageData: Only up to 4 components per pixel is support - attempted to set: %d", val);
+    ThrowRDE(
+        "Only up to 4 components per pixel is support - attempted to set: %d",
+        val);
   bpp /= cpp;
   cpp = val;
   bpp *= val;
@@ -118,46 +111,44 @@ void RawImageData::setCpp(uint32 val) {
 
 uchar8* RawImageData::getData() {
   if (!data)
-    ThrowRDE("RawImageData::getData - Data not yet allocated.");
+    ThrowRDE("Data not yet allocated.");
   return &data[mOffset.y*pitch+mOffset.x*bpp];
 }
 
 uchar8* RawImageData::getData(uint32 x, uint32 y) {
   if ((int)x >= dim.x)
-    ThrowRDE("RawImageData::getData - X Position outside image requested.");
+    ThrowRDE("X Position outside image requested.");
   if ((int)y >= dim.y) {
-    ThrowRDE("RawImageData::getData - Y Position outside image requested.");
+    ThrowRDE("Y Position outside image requested.");
   }
 
   x += mOffset.x;
   y += mOffset.y;
 
   if (!data)
-    ThrowRDE("RawImageData::getData - Data not yet allocated.");
+    ThrowRDE("Data not yet allocated.");
 
   return &data[y*pitch+x*bpp];
 }
 
 uchar8* RawImageData::getDataUncropped(uint32 x, uint32 y) {
   if ((int)x >= uncropped_dim.x)
-    ThrowRDE("RawImageData::getDataUncropped - X Position outside image requested.");
+    ThrowRDE("X Position outside image requested.");
   if ((int)y >= uncropped_dim.y) {
-    ThrowRDE("RawImageData::getDataUncropped - Y Position outside image requested.");
+    ThrowRDE("Y Position outside image requested.");
   }
 
   if (!data)
-    ThrowRDE("RawImageData::getDataUncropped - Data not yet allocated.");
+    ThrowRDE("Data not yet allocated.");
 
   return &data[y*pitch+x*bpp];
 }
 
-iPoint2D RawImageData::getUncroppedDim()
-{
+iPoint2D __attribute__((pure)) RawSpeed::RawImageData::getUncroppedDim() const {
   return uncropped_dim;
 }
 
-iPoint2D RawImageData::getCropOffset()
-{
+iPoint2D __attribute__((pure)) RawImageData::getCropOffset() const {
   return mOffset;
 }
 
@@ -175,22 +166,21 @@ void RawImageData::subFrame(iRectangle2D crop) {
   dim = crop.dim;
 }
 
-void RawImageData::setError( const char* err )
-{
+void RawImageData::setError(const string& err) {
   pthread_mutex_lock(&errMutex);
-  errors.push_back(strdup(err));
+  errors.push_back(err);
   pthread_mutex_unlock(&errMutex);
 }
 
 void RawImageData::createBadPixelMap()
 {
   if (!isAllocated())
-    ThrowRDE("RawImageData::createBadPixelMap: (internal) Bad pixel map cannot be allocated before image.");
+    ThrowRDE("(internal) Bad pixel map cannot be allocated before image.");
   mBadPixelMapPitch = roundUp(uncropped_dim.x / 8, 16);
   mBadPixelMap = (uchar8*)alignedMallocArray<16>(uncropped_dim.y, mBadPixelMapPitch);
   memset(mBadPixelMap, 0, (size_t)mBadPixelMapPitch * uncropped_dim.y);
   if (!mBadPixelMap)
-    ThrowRDE("RawImageData::createData: Memory Allocation failed.");
+    ThrowRDE("Memory Allocation failed.");
 }
 
 RawImage::RawImage(RawImageData* p) : p_(p) {
@@ -299,7 +289,7 @@ void RawImageData::startWorker(RawImageWorker::RawImageWorkerTask task, bool cro
     return;
   }
 
-#ifndef NO_PTHREAD
+#ifdef HAVE_PTHREAD
   auto **workers = new RawImageWorker *[threads];
   int y_offset = 0;
   int y_per_thread = (height + threads - 1) / threads;
@@ -460,19 +450,17 @@ RawImageWorker::RawImageWorker( RawImageData *_img, RawImageWorkerTask _task, in
   start_y = _start_y;
   end_y = _end_y;
   task = _task;
-#ifndef NO_PTHREAD
+#ifdef HAVE_PTHREAD
   pthread_attr_init(&attr);
   pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
 #endif
 }
 
-RawImageWorker::~RawImageWorker() {
-#ifndef NO_PTHREAD
-  pthread_attr_destroy(&attr);
+#ifdef HAVE_PTHREAD
+RawImageWorker::~RawImageWorker() { pthread_attr_destroy(&attr); }
 #endif
-}
 
-#ifndef NO_PTHREAD
+#ifdef HAVE_PTHREAD
 void RawImageWorker::startThread()
 {
   /* Initialize and set thread detached attribute */

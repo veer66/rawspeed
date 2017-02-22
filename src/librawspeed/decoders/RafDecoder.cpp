@@ -20,13 +20,14 @@
 */
 
 #include "decoders/RafDecoder.h"
-#include "common/Common.h"                          // for uint32, getHostE...
+#include "common/Common.h"                          // for uint32, ushort16
 #include "common/Point.h"                           // for iPoint2D, iRecta...
 #include "decoders/RawDecoderException.h"           // for ThrowRDE
 #include "decompressors/UncompressedDecompressor.h" // for UncompressedDeco...
 #include "io/ByteStream.h"                          // for ByteStream
+#include "io/Endianness.h"                          // for getHostEndianness
 #include "metadata/BlackArea.h"                     // for BlackArea
-#include "metadata/Camera.h"                        // for Camera
+#include "metadata/Camera.h"                        // for Camera, Hints
 #include "metadata/CameraMetaData.h"                // for CameraMetaData
 #include "metadata/CameraSensorInfo.h"              // for CameraSensorInfo
 #include "metadata/ColorFilterArray.h"              // for ColorFilterArray
@@ -35,9 +36,8 @@
 #include "tiff/TiffTag.h"                           // for TiffTag::FUJIOLDWB
 #include <cstdio>                                   // for size_t
 #include <cstring>                                  // for memcmp
-#include <map>                                      // for map, _Rb_tree_it...
-#include <memory>                                   // for unique_ptr
-#include <string>                                   // for string, allocator
+#include <memory>                                   // for unique_ptr, allo...
+#include <string>                                   // for string
 #include <vector>                                   // for vector
 
 using namespace std;
@@ -64,7 +64,7 @@ RawImage RafDecoder::decodeRawInternal() {
     height = e->getU16(0);
     width = e->getU16(1);
   } else
-    ThrowRDE("RAF decoder: Unable to locate image size");
+    ThrowRDE("Unable to locate image size");
 
   if (raw->hasEntry(FUJI_LAYOUT)) {
     TiffEntry *e = raw->getEntry(FUJI_LAYOUT);
@@ -75,7 +75,7 @@ RawImage RafDecoder::decodeRawInternal() {
   TiffEntry *counts = raw->getEntry(FUJI_STRIPBYTECOUNTS);
 
   if (offsets->count != 1 || counts->count != 1)
-    ThrowRDE("RAF Decoder: Multiple Strips found: %u %u", offsets->count, counts->count);
+    ThrowRDE("Multiple Strips found: %u %u", offsets->count, counts->count);
 
   int bps = 16;
   if (raw->hasEntry(FUJI_BITSPERSAMPLE))
@@ -87,7 +87,7 @@ RawImage RafDecoder::decodeRawInternal() {
   // Some fuji SuperCCD cameras include a second raw image next to the first one
   // that is identical but darker to the first. The two combined can produce
   // a higher dynamic range image. Right now we're ignoring it.
-  bool double_width = hints.find("double_width_unpacked") != hints.end();
+  bool double_width = hints.has("double_width_unpacked");
 
   mRaw->dim = iPoint2D(width*(double_width ? 2 : 1), height);
   mRaw->createData();
@@ -105,7 +105,7 @@ RawImage RafDecoder::decodeRawInternal() {
   } else if (input.isInNativeByteOrder() == (getHostEndianness() == big)) {
     u.decode16BitRawBEunpacked(width, height);
   } else {
-    if (hints.find("jpeg32_bitorder") != hints.end()) {
+    if (hints.has("jpeg32_bitorder")) {
       u.readUncompressedRaw(mRaw->dim, pos, width * bps / 8, bps,
                             BitOrder_Jpeg32);
     } else {
@@ -117,16 +117,12 @@ RawImage RafDecoder::decodeRawInternal() {
   return mRaw;
 }
 
-
-void RafDecoder::decodeThreaded(RawDecoderThread * t) {
-}
-
-void RafDecoder::checkSupportInternal(CameraMetaData *meta) {
+void RafDecoder::checkSupportInternal(const CameraMetaData* meta) {
   if (!this->checkCameraSupported(meta, mRootIFD->getID(), ""))
-     ThrowRDE("RAFDecoder: Unknown camera. Will not guess.");
+    ThrowRDE("Unknown camera. Will not guess.");
 }
 
-void RafDecoder::decodeMetaDataInternal(CameraMetaData *meta) {
+void RafDecoder::decodeMetaDataInternal(const CameraMetaData* meta) {
   int iso = 0;
   if (mRootIFD->hasEntryRecursive(ISOSPEEDRATINGS))
     iso = mRootIFD->getEntryRecursive(ISOSPEEDRATINGS)->getU32();
@@ -135,16 +131,16 @@ void RafDecoder::decodeMetaDataInternal(CameraMetaData *meta) {
   // This is where we'd normally call setMetaData but since we may still need
   // to rotate the image for SuperCCD cameras we do everything ourselves
   auto id = mRootIFD->getID();
-  Camera *cam = meta->getCamera(id.make, id.model, "");
+  const Camera* cam = meta->getCamera(id.make, id.model, "");
   if (!cam)
-    ThrowRDE("RAF Meta Decoder: Couldn't find camera");
+    ThrowRDE("Couldn't find camera");
 
   iPoint2D new_size(mRaw->dim);
   iPoint2D crop_offset = iPoint2D(0,0);
   if (applyCrop) {
     new_size = cam->cropSize;
     crop_offset = cam->cropPos;
-    bool double_width = hints.find("double_width_unpacked") != hints.end();
+    bool double_width = hints.has("double_width_unpacked");
     // If crop size is negative, use relative cropping
     if (new_size.x <= 0)
       new_size.x = mRaw->dim.x / (double_width ? 2 : 1) - cam->cropPos.x + new_size.x;
@@ -155,7 +151,7 @@ void RafDecoder::decodeMetaDataInternal(CameraMetaData *meta) {
       new_size.y = mRaw->dim.y - cam->cropPos.y + new_size.y;
   }
 
-  bool rotate = hints.find("fuji_rotate") != hints.end();
+  bool rotate = hints.has("fuji_rotate");
   rotate = rotate & fujiRotate;
 
   // Rotate 45 degrees - could be multithreaded.
@@ -195,7 +191,7 @@ void RafDecoder::decodeMetaDataInternal(CameraMetaData *meta) {
         if (h < rotated->dim.y && w < rotated->dim.x)
           dst[w + h * dest_pitch] = src[x];
         else
-          ThrowRDE("RAF Decoder: Trying to write out of bounds");
+          ThrowRDE("Trying to write out of bounds");
       }
     }
     mRaw = rotated;

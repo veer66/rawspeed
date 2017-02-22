@@ -31,8 +31,6 @@ namespace RawSpeed {
 
 class CameraMetaData;
 
-class RawDecoderThread;
-
 class RafDecoder final : public AbstractTiffDecoder
 {
 public:
@@ -42,13 +40,12 @@ public:
     : AbstractTiffDecoder(move(root), file) {}
 
   RawImage decodeRawInternal() override;
-  void decodeMetaDataInternal(CameraMetaData *meta) override;
-  void checkSupportInternal(CameraMetaData *meta) override;
+  void decodeMetaDataInternal(const CameraMetaData* meta) override;
+  void checkSupportInternal(const CameraMetaData* meta) override;
   static bool isRAF(FileMap* input);
 
 protected:
   int getDecoderVersion() const override { return 1; }
-  void decodeThreaded(RawDecoderThread *t) override;
   void DecodeRaf();
   bool alt_layout = false;
 };

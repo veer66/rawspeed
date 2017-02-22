@@ -18,12 +18,15 @@
     Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
 */
 
+#include "rawspeedconfig.h"
+
 #ifdef HAVE_ZLIB
 
 #include "decompressors/DeflateDecompressor.h"
-#include "common/Common.h"                // for uint32, getHostEndianness
+#include "common/Common.h"                // for uint32, ushort16
 #include "common/Point.h"                 // for iPoint2D
 #include "decoders/RawDecoderException.h" // for ThrowRDE
+#include "io/Endianness.h"                // for getHostEndianness, Endiann...
 #include <cstdio>                         // for size_t
 
 extern "C" {
@@ -68,7 +71,7 @@ static inline void decodeFPDeltaRow(unsigned char* src, unsigned char* dst,
   }
 }
 
-static inline uint32 fp16ToFloat(ushort16 fp16) {
+static inline uint32 __attribute__((const)) fp16ToFloat(ushort16 fp16) {
   // IEEE-754-2008: binary16:
   // bit 15 - sign
   // bits 14-10 - exponent (5 bit)
@@ -116,7 +119,7 @@ static inline uint32 fp16ToFloat(ushort16 fp16) {
   return (sign << 31) | (fp32_exponent << 23) | fp32_fraction;
 }
 
-static inline uint32 fp24ToFloat(uint32 fp24) {
+static inline uint32 __attribute__((const)) fp24ToFloat(uint32 fp24) {
   // binary24: Not a part of IEEE754-2008, but format is obvious,
   // see https://en.wikipedia.org/wiki/Minifloat
   // bit 23 - sign
@@ -194,9 +197,7 @@ void DeflateDecompressor::decode(unsigned char** uBuffer, int width, int height,
 
   int err = uncompress(*uBuffer, &dstLen, cBuffer, cSize);
   if (err != Z_OK) {
-    ThrowRDE(
-        "DeflateDecompressor::decodeDeflate: failed to uncompress tile: %d",
-        err);
+    ThrowRDE("failed to uncompress tile: %d", err);
   }
 
   int predFactor = 0;

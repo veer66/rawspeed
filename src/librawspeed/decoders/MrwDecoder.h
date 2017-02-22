@@ -35,12 +35,12 @@ class MrwDecoder final : public RawDecoder {
 public:
   MrwDecoder(FileMap* file);
   RawImage decodeRawInternal() override;
-  void checkSupportInternal(CameraMetaData *meta) override;
-  void decodeMetaDataInternal(CameraMetaData *meta) override;
+  void checkSupportInternal(const CameraMetaData* meta) override;
+  void decodeMetaDataInternal(const CameraMetaData* meta) override;
   static int isMRW(FileMap* input);
 protected:
   int getDecoderVersion() const override { return 0; }
-  virtual void parseHeader();
+  void parseHeader();
   uint32 raw_width, raw_height, data_offset, packed;
   TiffRootIFDOwner rootIFD;
   float wb_coeffs[4];

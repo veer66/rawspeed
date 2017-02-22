@@ -18,6 +18,8 @@
     Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
 */
 
+#include "rawspeedconfig.h"
+
 #include "common/Memory.h"
 
 #ifndef NDEBUG
@@ -59,7 +61,7 @@ void* alignedMalloc(size_t size, size_t alignment) {
   ptr = _aligned_malloc(size, alignment);
 #else
 #pragma message "No aligned malloc() implementation avaliable!"
-
+  assert(alignment <= alignof(std::max_align_t));
 #ifdef __APPLE__
   // apple malloc() aligns to 16 by default
   assert(alignment <= 16);

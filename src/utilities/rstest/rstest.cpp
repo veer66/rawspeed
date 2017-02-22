@@ -16,25 +16,24 @@
     Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
 */
 
-#include "config.h"
-
 #include "RawSpeed-API.h"
 
-#include <chrono>      // for milliseconds, steady_clock, duration
-#include <cstdint>     // for uint8_t
-#include <cstdio>      // for snprintf, size_t, fclose, fopen, fpr...
-#include <cstdlib>     // for system
-#include <cstring>     // for memset
-#include <fstream>     // IWYU pragma: keep
-#include <iomanip>     // for setw
-#include <iostream>    // for cout
-#include <map>         // for map
-#include <memory>      // for unique_ptr, allocator
-#include <sstream>     // IWYU pragma: keep
-#include <stdexcept>   // for runtime_error
-#include <string>      // for string, operator+, operator<<, char_...
-#include <type_traits> // for enable_if<>::type
-#include <utility>     // for pair
+#include "io/Endianness.h" // for getHostEndianness, BSWAP16, Endianness::l...
+#include <chrono>          // for milliseconds, steady_clock, duration, dur...
+#include <cstdint>         // for uint8_t
+#include <cstdio>          // for snprintf, size_t, fclose, fopen, fprintf
+#include <cstdlib>         // for system
+#include <cstring>         // for memset
+#include <fstream>         // IWYU pragma: keep
+#include <iomanip>         // for operator<<, setw
+#include <iostream>        // for cout, cerr, left, internal
+#include <map>             // for map
+#include <memory>          // for unique_ptr, allocator
+#include <sstream>         // IWYU pragma: keep
+#include <stdexcept>       // for runtime_error
+#include <string>          // for string, char_traits, operator+, operator<<
+#include <type_traits>     // for enable_if<>::type
+#include <utility>         // for pair
 
 #ifdef _OPENMP
 #include <omp.h>
@@ -141,8 +140,8 @@ string img_hash(RawImage &r) {
                static_cast<size_t>(r->pitch) * r->getUncroppedDim().y);
   APPEND("data md5sum: %s\n", hash.c_str());
 
-  for (const char *e : r->errors)
-    APPEND("WARNING: [rawspeed] %s\n", e);
+  for (const string& e : r->errors)
+    APPEND("WARNING: [rawspeed] %s\n", e.c_str());
 
 #undef APPEND
 
@@ -164,18 +163,17 @@ void writePPM(const RawImage& raw, const string& fn) {
   // Write pixels
   for (int y = 0; y < height; ++y) {
     auto *row = reinterpret_cast<unsigned short *>(raw->getData(0, y));
-    // Swap for PPM format byte ordering
-    if (getHostEndianness() == little)
-      for (int x = 0; x < width; ++x)
-        row[x] = BSWAP16(row[x]);
+    // PPM is big-endian
+    for (int x = 0; x < width; ++x)
+      row[x] = getU16BE(row + x);
 
     fwrite(row, 2, width, f);
   }
   fclose(f);
 }
 
-size_t process(const string &filename, CameraMetaData *metadata, bool create,
-               bool dump) {
+size_t process(const string& filename, const CameraMetaData* metadata,
+               bool create, bool dump) {
 
   const string hashfile(filename + ".hash");
 
@@ -327,7 +325,7 @@ int main(int argc, char **argv) {
   if (1 == argc || help)
     return usage(argv[0]);
 
-  CameraMetaData metadata(CMAKE_SOURCE_DIR "/data/cameras.xml");
+  const CameraMetaData metadata(CMAKE_SOURCE_DIR "/data/cameras.xml");
 
   size_t time = 0;
   map<string, string> failedTests;

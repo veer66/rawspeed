@@ -47,19 +47,21 @@ RawImage PefDecoder::decodeRawInternal() {
   }
 
   if (65535 != compression)
-    ThrowRDE("PEF Decoder: Unsupported compression");
+    ThrowRDE("Unsupported compression");
 
   TiffEntry *offsets = raw->getEntry(STRIPOFFSETS);
   TiffEntry *counts = raw->getEntry(STRIPBYTECOUNTS);
 
   if (offsets->count != 1) {
-    ThrowRDE("PEF Decoder: Multiple Strips found: %u", offsets->count);
+    ThrowRDE("Multiple Strips found: %u", offsets->count);
   }
   if (counts->count != offsets->count) {
-    ThrowRDE("PEF Decoder: Byte count number does not match strip size: count:%u, strips:%u ", counts->count, offsets->count);
+    ThrowRDE(
+        "Byte count number does not match strip size: count:%u, strips:%u ",
+        counts->count, offsets->count);
   }
   if (!mFile->isValid(offsets->getU32(), counts->getU32()))
-    ThrowRDE("PEF Decoder: Truncated file.");
+    ThrowRDE("Truncated file.");
 
   uint32 width = raw->getEntry(IMAGEWIDTH)->getU32();
   uint32 height = raw->getEntry(IMAGELENGTH)->getU32();
@@ -76,7 +78,7 @@ RawImage PefDecoder::decodeRawInternal() {
   return mRaw;
 }
 
-void PefDecoder::decodeMetaDataInternal(CameraMetaData *meta) {
+void PefDecoder::decodeMetaDataInternal(const CameraMetaData* meta) {
   int iso = 0;
   mRaw->cfa.setCFA(iPoint2D(2,2), CFA_RED, CFA_GREEN, CFA_GREEN, CFA_BLUE);
 

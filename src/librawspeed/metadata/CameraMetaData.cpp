@@ -35,15 +35,14 @@ namespace RawSpeed {
 
 using namespace pugi;
 
-CameraMetaData::CameraMetaData() = default;
-
 CameraMetaData::CameraMetaData(const char *docname) {
   xml_document doc;
   xml_parse_result result = doc.load_file(docname);
 
   if (!result) {
-    ThrowCME("CameraMetaData: XML Document could not be parsed successfully. Error was: %s in %s",
-      result.description(), doc.child("node").attribute("attr").value());
+    ThrowCME(
+        "XML Document could not be parsed successfully. Error was: %s in %s",
+        result.description(), doc.child("node").attribute("attr").value());
   }
 
   for (xml_node camera : doc.child("Cameras").children("Camera")) {
@@ -76,13 +75,14 @@ static inline CameraId getId(const string& make, const string& model,
   return id;
 }
 
-Camera* CameraMetaData::getCamera(const string& make, const string& model,
-                                  const string& mode) {
+const Camera* CameraMetaData::getCamera(const string& make, const string& model,
+                                        const string& mode) const {
   auto camera = cameras.find(getId(make, model, mode));
   return camera == cameras.end() ? nullptr : camera->second;
 }
 
-Camera* CameraMetaData::getCamera(const string& make, const string& model) {
+const Camera* CameraMetaData::getCamera(const string& make,
+                                        const string& model) const {
   auto id = getId(make, model, "");
 
   auto iter = find_if(cameras.begin(), cameras.end(),
@@ -99,16 +99,18 @@ Camera* CameraMetaData::getCamera(const string& make, const string& model) {
 }
 
 bool CameraMetaData::hasCamera(const string& make, const string& model,
-                               const string& mode) {
+                               const string& mode) const {
   return getCamera(make, model, mode);
 }
 
-Camera* CameraMetaData::getChdkCamera(uint32 filesize) {
+const Camera* __attribute__((pure))
+CameraMetaData::getChdkCamera(uint32 filesize) const {
   auto camera = chdkCameras.find(filesize);
   return camera == chdkCameras.end() ? nullptr : camera->second;
 }
 
-bool CameraMetaData::hasChdkCamera(uint32 filesize) {
+bool __attribute__((pure))
+CameraMetaData::hasChdkCamera(uint32 filesize) const {
   return chdkCameras.end() != chdkCameras.find(filesize);
 }
 
@@ -123,11 +125,11 @@ bool CameraMetaData::addCamera( Camera* cam )
   cameras[id] = cam;
 
   if (string::npos != cam->mode.find("chdk")) {
-    auto filesize_hint = cam->hints.find("filesize");
-    if (filesize_hint == cam->hints.end() || filesize_hint->second.empty()) {
+    auto filesize_hint = cam->hints.get("filesize", string());
+    if (filesize_hint.empty()) {
       writeLog(DEBUG_PRIO_WARNING, "CameraMetaData: CHDK camera: %s %s, no \"filesize\" hint set!\n", cam->make.c_str(), cam->model.c_str());
     } else {
-      chdkCameras[stoi(filesize_hint->second)] = cam;
+      chdkCameras[stoi(filesize_hint)] = cam;
       // writeLog(DEBUG_PRIO_WARNING, "CHDK camera: %s %s size:%u\n", cam->make.c_str(), cam->model.c_str(), size);
     }
   }
@@ -135,14 +137,14 @@ bool CameraMetaData::addCamera( Camera* cam )
 }
 
 void CameraMetaData::disableMake(const string &make) {
-  for (auto cam : cameras) {
+  for (const auto& cam : cameras) {
     if (cam.second->make == make)
       cam.second->supported = false;
   }
 }
 
 void CameraMetaData::disableCamera(const string &make, const string &model) {
-  for (auto cam : cameras) {
+  for (const auto& cam : cameras) {
     if (cam.second->make == make && cam.second->model == model)
       cam.second->supported = false;
   }

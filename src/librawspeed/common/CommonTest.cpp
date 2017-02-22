@@ -18,11 +18,14 @@
     Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
 */
 
-#include "common/Common.h" // for clampBits, isIn, isPowerOfTwo, roundUp
-#include <algorithm>       // for equal
-#include <gtest/gtest.h>   // for get, IsNullLiteralHelper, ParamIteratorIn...
-#include <stddef.h>        // for size_t
-#include <string>          // for basic_string, string, allocator, operator==
+#include "common/Common.h" // for uchar8, clampBits, isIn, isPower...
+#include <algorithm>       // for fill, min, equal
+#include <cassert>         // for assert
+#include <cstddef>         // for size_t
+#include <gtest/gtest.h>   // for make_tuple, get, IsNullLiteralHe...
+#include <limits>          // for numeric_limits
+#include <memory>          // for unique_ptr
+#include <string>          // for basic_string, string, allocator
 #include <vector>          // for vector
 
 using namespace std;
@@ -41,8 +44,12 @@ protected:
   bool expected; // expected output
 };
 static const powerOfTwoType powerOfTwoValues[] = {
-    {0, true},  {1, true},  {2, true}, {3, false}, {4, true},   {5, false},
-    {6, false}, {7, false}, {8, true}, {9, false}, {10, false}, {11, false}};
+    make_tuple(0, true),  make_tuple(1, true),   make_tuple(2, true),
+    make_tuple(3, false), make_tuple(4, true),   make_tuple(5, false),
+    make_tuple(6, false), make_tuple(7, false),  make_tuple(8, true),
+    make_tuple(9, false), make_tuple(10, false), make_tuple(11, false),
+
+};
 INSTANTIATE_TEST_CASE_P(PowerOfTwoTest, PowerOfTwoTest,
                         ::testing::ValuesIn(powerOfTwoValues));
 TEST_P(PowerOfTwoTest, PowerOfTwoTest) {
@@ -64,9 +71,13 @@ protected:
   size_t expected; // expected output
 };
 static const RoundUpType RoundUpValues[] = {
-    {0, 0, 0},   {0, 10, 0},  {10, 0, 10}, {10, 10, 10}, {10, 1, 10},
-    {10, 2, 10}, {10, 3, 12}, {10, 4, 12}, {10, 5, 10},  {10, 6, 12},
-    {10, 7, 14}, {10, 8, 16}, {10, 9, 18}, {10, 11, 11}, {10, 12, 12}};
+    make_tuple(0, 0, 0),    make_tuple(0, 10, 0),   make_tuple(10, 0, 10),
+    make_tuple(10, 10, 10), make_tuple(10, 1, 10),  make_tuple(10, 2, 10),
+    make_tuple(10, 3, 12),  make_tuple(10, 4, 12),  make_tuple(10, 5, 10),
+    make_tuple(10, 6, 12),  make_tuple(10, 7, 14),  make_tuple(10, 8, 16),
+    make_tuple(10, 9, 18),  make_tuple(10, 11, 11), make_tuple(10, 12, 12),
+
+};
 INSTANTIATE_TEST_CASE_P(RoundUpTest, RoundUpTest,
                         ::testing::ValuesIn(RoundUpValues));
 TEST_P(RoundUpTest, RoundUpTest) { ASSERT_EQ(roundUp(in, multiple), expected); }
@@ -85,8 +96,12 @@ protected:
 };
 
 static const IsInType IsInValues[] = {
-    {"foo", true},   {"foo2", true},  {"bar", true},    {"baz", true},
-    {"foo1", false}, {"bar2", false}, {"baz-1", false}, {"quz", false}};
+    make_tuple("foo", true),    make_tuple("foo2", true),
+    make_tuple("bar", true),    make_tuple("baz", true),
+    make_tuple("foo1", false),  make_tuple("bar2", false),
+    make_tuple("baz-1", false), make_tuple("quz", false),
+
+};
 INSTANTIATE_TEST_CASE_P(IsInTest, IsInTest, ::testing::ValuesIn(IsInValues));
 TEST_P(IsInTest, IsInTest) {
   ASSERT_EQ(isIn(in, {"foo", "foo2", "bar", "baz"}), expected);
@@ -108,7 +123,7 @@ protected:
   unsigned long long int expected; // expected output
 };
 
-#define ROWS(v, p, pv) {(v), (p), ((v) <= (pv)) ? (v) : (pv)},
+#define ROWS(v, p, pv) make_tuple((v), (p), ((v) <= (pv)) ? (v) : (pv)),
 
 #define THREEROWS(v, p)                                                        \
   ROWS(((1ULL << (v##ULL)) - 1ULL), (p), ((1ULL << (p##ULL)) - 1ULL))          \
@@ -128,8 +143,10 @@ protected:
   MOREROWS(2) MOREROWS(4) MOREROWS(8) MOREROWS(16) MOREROWS(24) MOREROWS(32)
 
 static const ClampBitsType ClampBitsValues[] = {
-    {0, 0, 0},  {0, 32, 0},  {32, 0, 0},   {32, 32, 32},
-    {32, 2, 3}, {-32, 0, 0}, {-32, 32, 0}, GENERATE()};
+    make_tuple(0, 0, 0),    make_tuple(0, 32, 0),
+    make_tuple(32, 0, 0),   make_tuple(32, 32, 32),
+    make_tuple(32, 2, 3),   make_tuple(-32, 0, 0),
+    make_tuple(-32, 32, 0), GENERATE()};
 INSTANTIATE_TEST_CASE_P(ClampBitsTest, ClampBitsTest,
                         ::testing::ValuesIn(ClampBitsValues));
 TEST_P(ClampBitsTest, ClampBitsTest) { ASSERT_EQ(clampBits(in, n), expected); }
@@ -149,17 +166,21 @@ protected:
 
 static const TrimSpacesType TrimSpacesValues[] = {
 #define STR "fo2o 3,24 b5a#r"
-    {"foo", "foo"},
-    {STR, STR},
-    {"  " STR, STR},
-    {"\t" STR, STR},
-    {" \t " STR, STR},
-    {STR "  ", STR},
-    {STR "\t", STR},
-    {STR "  \t  ", STR},
-    {"  " STR "  ", STR},
-    {"\t" STR "\t", STR},
-    {"  \t  " STR "  \t  ", STR},
+    make_tuple("foo", "foo"),
+    make_tuple(STR, STR),
+    make_tuple("  " STR, STR),
+    make_tuple("\t" STR, STR),
+    make_tuple(" \t " STR, STR),
+    make_tuple(STR "  ", STR),
+    make_tuple(STR "\t", STR),
+    make_tuple(STR "  \t  ", STR),
+    make_tuple("  " STR "  ", STR),
+    make_tuple("\t" STR "\t", STR),
+    make_tuple("  \t  " STR "  \t  ", STR),
+    make_tuple("    ", ""),
+    make_tuple("  \t", ""),
+    make_tuple("  \t  ", ""),
+    make_tuple("\t  ", ""),
 #undef STR
 };
 INSTANTIATE_TEST_CASE_P(TrimSpacesTest, TrimSpacesTest,
@@ -181,8 +202,11 @@ protected:
   vector<string> out; // expected output
 };
 static const splitStringType splitStringValues[] = {
-    {" ini mi,ni  moe ", ' ', vector<string>({"ini", "mi,ni", "moe"})},
-    {" 412, 542,732 , ", ',', vector<string>({" 412", " 542", "732 ", " "})},
+    make_tuple(" ini mi,ni  moe ", ' ',
+               vector<string>({"ini", "mi,ni", "moe"})),
+    make_tuple(" 412, 542,732 , ", ',',
+               vector<string>({" 412", " 542", "732 ", " "})),
+
 };
 INSTANTIATE_TEST_CASE_P(SplitStringTest, SplitStringTest,
                         ::testing::ValuesIn(splitStringValues));
@@ -190,4 +214,93 @@ TEST_P(SplitStringTest, SplitStringTest) {
   auto split = splitString(in, sep);
   ASSERT_EQ(split.size(), out.size());
   ASSERT_TRUE(std::equal(split.begin(), split.end(), out.begin()));
+}
+
+TEST(UnrollLoopTest, Test) {
+  ASSERT_NO_THROW({
+    int cnt = 0;
+    unroll_loop<0>([&](int i) { cnt++; });
+    ASSERT_EQ(cnt, 0);
+  });
+
+  ASSERT_NO_THROW({
+    int cnt = 0;
+    unroll_loop<3>([&](int i) { cnt++; });
+    ASSERT_EQ(cnt, 3);
+  });
+}
+
+TEST(GetThreadCountTest, Test) {
+  ASSERT_NO_THROW({ ASSERT_GE(getThreadCount(), 1); });
+}
+
+TEST(MakeUniqueTest, Test) {
+  ASSERT_NO_THROW({
+    auto s = make_unique<int>(0);
+    ASSERT_EQ(*s, 0);
+  });
+  ASSERT_NO_THROW({
+    auto s = make_unique<int>(314);
+    ASSERT_EQ(*s, 314);
+  });
+}
+
+using copyPixelsType = std::tr1::tuple<int, int, int, int>;
+class CopyPixelsTest : public ::testing::TestWithParam<copyPixelsType> {
+protected:
+  CopyPixelsTest() = default;
+  virtual void SetUp() {
+    dstPitch = std::tr1::get<0>(GetParam());
+    srcPitch = std::tr1::get<1>(GetParam());
+    rowSize = min(min(std::tr1::get<2>(GetParam()), srcPitch), dstPitch);
+    height = std::tr1::get<3>(GetParam());
+
+    assert(srcPitch * height < numeric_limits<uchar8>::max());
+    assert(dstPitch * height < numeric_limits<uchar8>::max());
+
+    src.resize((size_t)srcPitch * height);
+    dst.resize((size_t)dstPitch * height);
+
+    fill(src.begin(), src.end(), 0);
+    fill(dst.begin(), dst.end(), -1);
+  }
+  void generate() {
+    uchar8 v = 0;
+
+    for (int y = 0; y < height; y++) {
+      for (int x = 0; x < rowSize; x++, v++) {
+        src[y * srcPitch + x] = v;
+      }
+    }
+  }
+  void copy() {
+    if (src.empty() || dst.empty())
+      return;
+
+    copyPixels(&(dst[0]), dstPitch, &(src[0]), srcPitch, rowSize, height);
+  }
+  void compare() {
+    for (int y = 0; y < height; y++) {
+      for (int x = 0; x < rowSize; x++) {
+        ASSERT_EQ(dst[y * dstPitch + x], src[y * srcPitch + x]);
+      }
+    }
+  }
+
+  vector<uchar8> src;
+  vector<uchar8> dst;
+  int dstPitch;
+  int srcPitch;
+  int rowSize;
+  int height;
+};
+INSTANTIATE_TEST_CASE_P(CopyPixelsTest, CopyPixelsTest,
+                        testing::Combine(testing::Range(0, 4, 1),
+                                         testing::Range(0, 4, 1),
+                                         testing::Range(0, 4, 1),
+                                         testing::Range(0, 4, 1)));
+TEST_P(CopyPixelsTest, CopyPixelsTest) {
+  generate();
+  copy();
+  compare();
 }

@@ -20,13 +20,14 @@
 */
 
 #include "decoders/MosDecoder.h"
-#include "common/Common.h"                          // for uint32, getU32LE
+#include "common/Common.h"                          // for uint32, uchar8
 #include "common/Point.h"                           // for iPoint2D
 #include "decoders/RawDecoder.h"                    // for RawDecoder
 #include "decoders/RawDecoderException.h"           // for ThrowRDE
 #include "decompressors/UncompressedDecompressor.h" // for UncompressedDeco...
 #include "io/BitPumpMSB32.h"                        // for BitPumpMSB32
 #include "io/ByteStream.h"                          // for ByteStream
+#include "io/Endianness.h"                          // for getU32LE, getLE
 #include "tiff/TiffEntry.h"                         // for TiffEntry
 #include "tiff/TiffIFD.h"                           // for TiffRootIFD, Tif...
 #include "tiff/TiffTag.h"                           // for TiffTag::TILEOFF...
@@ -54,7 +55,7 @@ MosDecoder::MosDecoder(TiffRootIFDOwner&& rootIFD, FileMap* file)
   } else {
     TiffEntry *xmp = mRootIFD->getEntryRecursive(XMP);
     if (!xmp)
-      ThrowRDE("MOS Decoder: Couldn't find the XMP");
+      ThrowRDE("Couldn't find the XMP");
     string xmpText = xmp->getString();
     make = getXMPTag(xmpText, "Make");
     model = getXMPTag(xmpText, "Model");
@@ -65,7 +66,7 @@ string MosDecoder::getXMPTag(const string &xmp, const string &tag) {
   string::size_type start = xmp.find("<tiff:"+tag+">");
   string::size_type end = xmp.find("</tiff:"+tag+">");
   if (start == string::npos || end == string::npos || end <= start)
-    ThrowRDE("MOS Decoder: Couldn't find tag '%s' in the XMP", tag.c_str());
+    ThrowRDE("Couldn't find tag '%s' in the XMP", tag.c_str());
   int startlen = tag.size()+7;
   return xmp.substr(start+startlen, end-start-startlen);
 }
@@ -79,15 +80,15 @@ RawImage MosDecoder::decodeRawInternal() {
   if (getU32LE(insideTiff) == 0x49494949) {
     uint32 offset = getU32LE(insideTiff + 8);
     if (offset+base+4 > mFile->getSize())
-      ThrowRDE("MOS: PhaseOneC offset out of bounds");
+      ThrowRDE("offset out of bounds");
 
     uint32 entries = getU32LE(insideTiff + offset);
     uint32 pos = 8; // Skip another 4 bytes
 
     uint32 width=0, height=0, strip_offset=0, data_offset=0, wb_offset=0;
-    while (entries--) {
+    for (; entries > 0; entries--) {
       if (offset+base+pos+16 > mFile->getSize())
-        ThrowRDE("MOS: PhaseOneC offset out of bounds");
+        ThrowRDE("offset out of bounds");
 
       uint32 tag = getU32LE(insideTiff + offset + pos + 0);
       // uint32 type = getU32LE(insideTiff + offset + pos + 4);
@@ -104,11 +105,11 @@ RawImage MosDecoder::decodeRawInternal() {
       }
     }
     if (width <= 0 || height <= 0)
-      ThrowRDE("MOS: PhaseOneC couldn't find width and height");
+      ThrowRDE("couldn't find width and height");
     if (strip_offset+height*4 > mFile->getSize())
-      ThrowRDE("MOS: PhaseOneC strip offsets out of bounds");
+      ThrowRDE("strip offsets out of bounds");
     if (data_offset > mFile->getSize())
-      ThrowRDE("MOS: PhaseOneC data offset out of bounds");
+      ThrowRDE("data offset out of bounds");
 
     mRaw->dim = iPoint2D(width, height);
     mRaw->createData();
@@ -148,11 +149,11 @@ RawImage MosDecoder::decodeRawInternal() {
       u.decode16BitRawUnpacked(width, height);
   }
   else if (99 == compression || 7 == compression) {
-    ThrowRDE("MOS Decoder: Leaf LJpeg not yet supported");
+    ThrowRDE("Leaf LJpeg not yet supported");
     //LJpegPlain l(mFile, mRaw);
     //l.startDecoder(off, mFile->getSize()-off, 0, 0);
   } else
-    ThrowRDE("MOS Decoder: Unsupported compression: %d", compression);
+    ThrowRDE("Unsupported compression: %d", compression);
 
   return mRaw;
 }
@@ -166,7 +167,8 @@ void MosDecoder::DecodePhaseOneC(uint32 data_offset, uint32 strip_offset, uint32
         data_offset + getU32LE(mFile->getData(strip_offset + row * 4, 4));
 
     BitPumpMSB32 pump(mFile, off);
-    uint32 pred[2], len[2];
+    int32 pred[2];
+    uint32 len[2];
     pred[0] = pred[1] = 0;
     auto *img = (ushort16 *)mRaw->getData(0, row);
     for (uint32 col=0; col < width; col++) {
@@ -174,7 +176,7 @@ void MosDecoder::DecodePhaseOneC(uint32 data_offset, uint32 strip_offset, uint32
         len[0] = len[1] = 14;
       else if ((col & 7) == 0) {
         for (unsigned int &i : len) {
-          uint32 j = 0;
+          int32 j = 0;
           for (; j < 5 && !pump.getBitsSafe(1); j++);
           if (j--)
             i = length[j * 2 + pump.getBitsSafe(1)];
@@ -185,16 +187,17 @@ void MosDecoder::DecodePhaseOneC(uint32 data_offset, uint32 strip_offset, uint32
       if (i == 14)
         img[col] = pred[col & 1] = pump.getBitsSafe(16);
       else
-        img[col] = pred[col & 1] += pump.getBitsSafe(i) + 1 - (1 << (i - 1));
+        img[col] = pred[col & 1] +=
+            (signed)pump.getBitsSafe(i) + 1 - (1 << (i - 1));
     }
   }
 }
 
-void MosDecoder::checkSupportInternal(CameraMetaData *meta) {
+void MosDecoder::checkSupportInternal(const CameraMetaData* meta) {
   RawDecoder::checkCameraSupported(meta, make, model, "");
 }
 
-void MosDecoder::decodeMetaDataInternal(CameraMetaData *meta) {
+void MosDecoder::decodeMetaDataInternal(const CameraMetaData* meta) {
   RawDecoder::setMetaData(meta, make, model, "", 0);
 
   // Fetch the white balance (see dcraw.c parse_mos for more metadata that can be gotten)

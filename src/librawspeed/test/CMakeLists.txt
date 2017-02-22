@@ -1,11 +1,5 @@
 add_custom_target(tests ALL)
 
-if(APPLE)
-  # Apple XCode seems to generate HUGE stack/frames, much bigger than anything else.
-  math(EXPR HUGESIZE 128*1024)
-  CHECK_CXX_COMPILER_FLAG_AND_ENABLE_IT(-Wframe-larger-than=${HUGESIZE})
-endif()
-
 FILE(GLOB RAWSPEED_TEST_SOURCES
   "RawSpeed.cpp"
 )
@@ -18,7 +12,7 @@ else()
 endif()
 
 target_link_libraries(rawspeed_test PUBLIC ${RAWSPEED_LIBS})
-target_include_directories(rawspeed_test PUBLIC "${CONFIG_INCLUDE_PATH}")
+target_compile_definitions(rawspeed_test PUBLIC "$<TARGET_PROPERTY:rawspeed,COMPILE_DEFINITIONS>")
 target_include_directories(rawspeed_test PUBLIC "$<TARGET_PROPERTY:rawspeed,INCLUDE_DIRECTORIES>")
 add_dependencies(rawspeed_test rawspeed)
 
@@ -30,14 +24,18 @@ endif()
 
 FILE(GLOB RAWSPEED_TESTS_SOURCES
   "../common/CommonTest.cpp"
+  "../common/MemoryTest.cpp"
   "../common/PointTest.cpp"
+  "../io/EndiannessTest.cpp"
   "../metadata/BlackAreaTest.cpp"
   "../metadata/CameraMetaDataTest.cpp"
   "../metadata/CameraSensorInfoTest.cpp"
+  "../metadata/CameraTest.cpp"
   "../metadata/ColorFilterArrayTest.cpp"
   "ExceptionsTest.cpp"
-  "RawSpeedTest.cpp"
 )
+
+CHECK_CXX_COMPILER_FLAG_AND_ENABLE_IT(-Wno-suggest-attribute=const)
 
 set(CMAKE_CXX_CLANG_TIDY_SAVE "${CMAKE_CXX_CLANG_TIDY}")
 
@@ -47,7 +45,8 @@ foreach(IN ${RAWSPEED_TESTS_SOURCES})
   get_filename_component(TESTNAME ${IN} NAME_WE)
   add_executable(${TESTNAME} ${IN})
   target_link_libraries(${TESTNAME} rawspeed_test)
-  GTEST_ADD_TESTS(${TESTNAME} "" AUTO)
+  # GTEST_ADD_TESTS(${TESTNAME} "" AUTO)
+  add_test(NAME ${TESTNAME} COMMAND ${TESTNAME})
   add_dependencies(tests ${TESTNAME})
 endforeach()
 

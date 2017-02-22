@@ -23,18 +23,19 @@
 #include "common/Common.h"                // for uint32, ushort16, int32
 #include "common/Point.h"                 // for iPoint2D
 #include "decoders/RawDecoderException.h" // for ThrowRDE, RawDecoderException
+#include "decompressors/HuffmanTable.h"   // for HuffmanTable::signExtend
 #include "io/BitPumpMSB32.h"              // for BitPumpMSB32
 #include "io/ByteStream.h"                // for ByteStream
+#include "io/Endianness.h"                // for getHostEndianness, Endiann...
+#include "metadata/Camera.h"              // for Hints
 #include "metadata/CameraMetaData.h"      // for CameraMetaData
 #include "tiff/TiffEntry.h"               // for TiffEntry
 #include "tiff/TiffIFD.h"                 // for TiffRootIFD, TiffIFD, TiffID
 #include "tiff/TiffTag.h"                 // for TiffTag::STRIPOFFSETS, Tif...
 #include <algorithm>                      // for max
-#include <map>                            // for _Rb_tree_iterator, map
 #include <memory>                         // for unique_ptr
 #include <sstream>                        // for ostringstream, operator<<
-#include <string>                         // for string, operator==, basic_...
-#include <utility>                        // for pair
+#include <string>                         // for string
 #include <vector>                         // for vector
 
 using namespace std;
@@ -48,14 +49,11 @@ RawImage SrwDecoder::decodeRawInternal() {
   int bits = raw->getEntry(BITSPERSAMPLE)->getU32();
 
   if (32769 != compression && 32770 != compression && 32772 != compression && 32773 != compression)
-    ThrowRDE("Srw Decoder: Unsupported compression");
+    ThrowRDE("Unsupported compression");
 
   if (32769 == compression)
   {
-    bool bit_order = false;  // Default guess
-    auto msb_hint = hints.find("msb_override");
-    if (msb_hint != hints.end())
-      bit_order = ("true" == (msb_hint->second));
+    bool bit_order = hints.get("msb_override", false);
     this->decodeUncompressed(raw, bit_order ? BitOrder_Jpeg : BitOrder_Plain);
     return mRaw;
   }
@@ -63,16 +61,13 @@ RawImage SrwDecoder::decodeRawInternal() {
   if (32770 == compression)
   {
     if (!raw->hasEntry ((TiffTag)40976)) {
-      bool bit_order = (bits == 12);  // Default guess
-      auto msb_hint = hints.find("msb_override");
-      if (msb_hint != hints.end())
-        bit_order = ("true" == (msb_hint->second));
+      bool bit_order = hints.get("msb_override", bits == 12);
       this->decodeUncompressed(raw, bit_order ? BitOrder_Jpeg : BitOrder_Plain);
       return mRaw;
     }
     uint32 nslices = raw->getEntry(STRIPOFFSETS)->count;
     if (nslices != 1)
-      ThrowRDE("Srw Decoder: Only one slice supported, found %u", nslices);
+      ThrowRDE("Only one slice supported, found %u", nslices);
     try {
       decodeCompressed(raw);
     } catch (RawDecoderException& e) {
@@ -84,7 +79,7 @@ RawImage SrwDecoder::decodeRawInternal() {
   {
     uint32 nslices = raw->getEntry(STRIPOFFSETS)->count;
     if (nslices != 1)
-      ThrowRDE("Srw Decoder: Only one slice supported, found %u", nslices);
+      ThrowRDE("Only one slice supported, found %u", nslices);
     try {
       decodeCompressed2(raw, bits);
     } catch (RawDecoderException& e) {
@@ -97,7 +92,7 @@ RawImage SrwDecoder::decodeRawInternal() {
     decodeCompressed3(raw, bits);
     return mRaw;
   }
-  ThrowRDE("Srw Decoder: Unsupported compression");
+  ThrowRDE("Unsupported compression");
   return mRaw;
 }
 // Decoder for compressed srw files (NX300 and later)
@@ -115,7 +110,7 @@ void SrwDecoder::decodeCompressed( const TiffIFD* raw )
   for (uint32 y = 0; y < height; y++) {
     uint32 line_offset = offset + bs.getI32();
     if (line_offset >= mFile->getSize())
-      ThrowRDE("Srw decoder: Offset outside image file, file probably truncated.");
+      ThrowRDE("Offset outside image file, file probably truncated.");
     int len[4];
     for (int &i : len)
       i = y < 2 ? 7 : 4;
@@ -139,16 +134,18 @@ void SrwDecoder::decodeCompressed( const TiffIFD* raw )
           case 1: len[i]++;
         }
         if (len[i] < 0)
-          ThrowRDE("Srw Decompressor: Bit length less than 0.");
+          ThrowRDE("Bit length less than 0.");
         if (len[i] > 16)
-          ThrowRDE("Srw Decompressor: Bit Length more than 16.");
+          ThrowRDE("Bit Length more than 16.");
       }
       if (dir) {
         // Upward prediction
         // First we decode even pixels
         for (int c = 0; c < 16; c += 2) {
           int b = len[(c >> 3)];
-          int32 adj = ((int32) bits.getBits(b) << (32-b) >> (32-b));
+          int32 adj = 0;
+          if (b)
+            adj = ((int32)bits.getBits(b) << (32 - b) >> (32 - b));
           img[c] = adj + img_up[c];
         }
         // Now we decode odd pixels
@@ -156,7 +153,9 @@ void SrwDecoder::decodeCompressed( const TiffIFD* raw )
         // is beyond me, it will hurt compression a deal.
         for (int c = 1; c < 16; c += 2) {
           int b = len[2 | (c >> 3)];
-          int32 adj = ((int32) bits.getBits(b) << (32-b) >> (32-b));
+          int32 adj = 0;
+          if (b)
+            adj = ((int32)bits.getBits(b) << (32 - b) >> (32 - b));
           img[c] = adj + img_up2[c];
         }
       } else {
@@ -165,14 +164,18 @@ void SrwDecoder::decodeCompressed( const TiffIFD* raw )
         int pred_left = x ? img[-2] : 128;
         for (int c = 0; c < 16; c += 2) {
           int b = len[(c >> 3)];
-          int32 adj = ((int32) bits.getBits(b) << (32-b) >> (32-b));
+          int32 adj = 0;
+          if (b)
+            adj = ((int32)bits.getBits(b) << (32 - b) >> (32 - b));
           img[c] = adj + pred_left;
         }
         // Now we decode odd pixels
         pred_left = x ? img[-1] : 128;
         for (int c = 1; c < 16; c += 2) {
           int b = len[2 | (c >> 3)];
-          int32 adj = ((int32) bits.getBits(b) << (32-b) >> (32-b));
+          int32 adj = 0;
+          if (b)
+            adj = ((int32)bits.getBits(b) << (32 - b) >> (32 - b));
           img[c] = adj + pred_left;
         }
       }
@@ -244,7 +247,7 @@ void SrwDecoder::decodeCompressed2( const TiffIFD* raw, int bits)
         hpred[x & 1] += diff;
       img[x] = hpred[x & 1];
       if (img[x] >> bits)
-        ThrowRDE("SRW: Error: decoded value out of bounds at %d:%d", x, y);
+        ThrowRDE("decoded value out of bounds at %d:%d", x, y);
     }
   }
 }
@@ -260,8 +263,8 @@ int32 SrwDecoder::samsungDiff (BitPumpMSB &pump, encTableItem *tbl)
   int32 diff = pump.getBitsSafe(len);
 
   // If the first bit is 0 we need to turn this into a negative number
-  if (len && (diff & (1 << (len-1))) == 0)
-    diff -= (1 << len) - 1;
+  diff = len ? HuffmanTable::signExtended(diff, len) : diff;
+
   return diff;
 }
 
@@ -342,7 +345,7 @@ void SrwDecoder::decodeCompressed3(const TiffIFD* raw, int bits)
       else if (!pump.getBitsSafe(1))
         motion = pump.getBitsSafe(3);
       if ((row==0 || row==1) && (motion != 7))
-        ThrowRDE("SRW Decoder: At start of image and motion isn't 7. File corrupted?");
+        ThrowRDE("At start of image and motion isn't 7. File corrupted?");
       if (motion == 7) {
         // The base case, just set all pixels to the previous ones on the same line
         // If we're at the left edge we just start at the initial value
@@ -352,7 +355,8 @@ void SrwDecoder::decodeCompressed3(const TiffIFD* raw, int bits)
       } else {
         // The complex case, we now need to actually lookup one or two lines above
         if (row < 2)
-          ThrowRDE("SRW: Got a previous line lookup on first two lines. File corrupted?");
+          ThrowRDE(
+              "Got a previous line lookup on first two lines. File corrupted?");
         int32 motionOffset[7] =    {-4,-2,-2,0,0,2,4};
         int32 motionDoAverage[7] = { 0, 0, 1,0,1,0,0};
 
@@ -392,7 +396,7 @@ void SrwDecoder::decodeCompressed3(const TiffIFD* raw, int bits)
           diffBitsMode[colornum][0] = diffBitsMode[colornum][1];
           diffBitsMode[colornum][1] = diffBits[i];
           if(diffBits[i] > bitDepth+1)
-            ThrowRDE("SRW Decoder: Too many difference bits. File corrupted?");
+            ThrowRDE("Too many difference bits. File corrupted?");
         }
       }
 
@@ -402,7 +406,7 @@ void SrwDecoder::decodeCompressed3(const TiffIFD* raw, int bits)
         int32 diff = pump.getBitsSafe(len);
 
         // If the first bit is 1 we need to turn this into a negative number
-        if (diff >> (len-1))
+        if (len != 0 && diff >> (len - 1))
           diff -= (1 << len);
 
         ushort16 *value = nullptr;
@@ -434,7 +438,7 @@ string SrwDecoder::getMode() {
   return "";
 }
 
-void SrwDecoder::checkSupportInternal(CameraMetaData *meta) {
+void SrwDecoder::checkSupportInternal(const CameraMetaData* meta) {
   auto id = mRootIFD->getID();
   string mode = getMode();
   if (meta->hasCamera(id.make, id.model, mode))
@@ -443,7 +447,7 @@ void SrwDecoder::checkSupportInternal(CameraMetaData *meta) {
     this->checkCameraSupported(meta, id, "");
 }
 
-void SrwDecoder::decodeMetaDataInternal(CameraMetaData *meta) {
+void SrwDecoder::decodeMetaDataInternal(const CameraMetaData* meta) {
   int iso = 0;
   if (mRootIFD->hasEntryRecursive(ISOSPEEDRATINGS))
     iso = mRootIFD->getEntryRecursive(ISOSPEEDRATINGS)->getU32();

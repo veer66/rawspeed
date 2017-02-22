@@ -25,8 +25,10 @@
 #include "metadata/BlackArea.h"        // for BlackArea
 #include "metadata/CameraSensorInfo.h" // for CameraSensorInfo
 #include "metadata/ColorFilterArray.h" // for ColorFilterArray
-#include <map>                         // for map
-#include <string>                      // for string, basic_string, allocator
+#include <map>                         // for map, _Rb_tree_const_iterator
+#include <sstream>                     // for istringstream, basic_istream
+#include <string>                      // for string, basic_string, operator>>
+#include <utility>                     // for pair
 #include <vector>                      // for vector
 
 namespace pugi {
@@ -35,12 +37,45 @@ class xml_node;
 
 namespace RawSpeed {
 
+class Hints
+{
+  std::map<std::string, std::string> data;
+public:
+  void add(const std::string& key, const std::string& value)
+  {
+    data.insert({key, value});
+  }
+
+  bool has(const std::string& key) const
+  {
+    return data.find(key) != data.end();
+  }
+
+  template <typename T>
+  T get(const std::string& key, T defaultValue) const
+  {
+    auto hint = data.find(key);
+    if (hint != data.end() && !hint->second.empty()) {
+      std::istringstream iss(hint->second);
+      iss >> defaultValue;
+    }
+    return defaultValue;
+  }
+
+  bool get(const std::string& key, bool defaultValue) const {
+    auto hint = data.find(key);
+    if (hint == data.end())
+      return defaultValue;
+    return "true" == hint->second;
+  }
+};
+
 class Camera
 {
 public:
   Camera(pugi::xml_node &camera);
   Camera(const Camera* camera, uint32 alias_num);
-  const CameraSensorInfo* getSensorInfo(int iso);
+  const CameraSensorInfo* getSensorInfo(int iso) const;
   std::string make;
   std::string model;
   std::string mode;
@@ -57,7 +92,7 @@ public:
   std::vector<BlackArea> blackAreas;
   std::vector<CameraSensorInfo> sensorInfo;
   int decoderVersion;
-  std::map<std::string,std::string> hints;
+  Hints hints;
 protected:
   void parseCFA(const pugi::xml_node &node);
   void parseCrop(const pugi::xml_node &node);

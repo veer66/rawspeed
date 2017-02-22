@@ -27,17 +27,17 @@
 #include "io/BitPumpMSB.h"                          // for BitPumpMSB
 #include "io/ByteStream.h"                          // for ByteStream
 #include "io/IOException.h"                         // for IOException
+#include "metadata/Camera.h"                        // for Hints
 #include "metadata/ColorFilterArray.h"              // for ColorFilterArray
 #include "parsers/TiffParserException.h"            // for TiffParserException
 #include "tiff/TiffEntry.h"                         // for TiffEntry
 #include "tiff/TiffIFD.h"                           // for TiffRootIFD, Tif...
 #include "tiff/TiffTag.h"                           // for TiffTag, TiffTag...
 #include <algorithm>                                // for min
+#include <cmath>                                    // for signbit
 #include <cstdlib>                                  // for abs
 #include <cstring>                                  // for memset
-#include <map>                                      // for map, _Rb_tree_it...
 #include <memory>                                   // for unique_ptr
-#include <string>                                   // for string
 
 using namespace std;
 
@@ -50,13 +50,15 @@ RawImage OrfDecoder::decodeRawInternal() {
 
   int compression = raw->getEntry(COMPRESSION)->getU32();
   if (1 != compression)
-    ThrowRDE("ORF Decoder: Unsupported compression");
+    ThrowRDE("Unsupported compression");
 
   TiffEntry *offsets = raw->getEntry(STRIPOFFSETS);
   TiffEntry *counts = raw->getEntry(STRIPBYTECOUNTS);
 
   if (counts->count != offsets->count)
-    ThrowRDE("ORF Decoder: Byte count number does not match strip size: count:%u, strips:%u ", counts->count, offsets->count);
+    ThrowRDE(
+        "Byte count number does not match strip size: count:%u, strips:%u ",
+        counts->count, offsets->count);
 
   //TODO: this code assumes that all strips are layed out directly after another without padding and in order
   uint32 off = raw->getEntry(STRIPOFFSETS)->getU32();
@@ -65,7 +67,7 @@ RawImage OrfDecoder::decodeRawInternal() {
     size += counts->getU32(i);
 
   if (!mFile->isValid(off, size))
-    ThrowRDE("ORF Decoder: Truncated file");
+    ThrowRDE("Truncated file");
 
   uint32 width = raw->getEntry(IMAGEWIDTH)->getU32();
   uint32 height = raw->getEntry(IMAGELENGTH)->getU32();
@@ -77,7 +79,7 @@ RawImage OrfDecoder::decodeRawInternal() {
   input.setPosition(off);
 
   try {
-    if (offsets->count != 1 || (hints.find(string("force_uncompressed")) != hints.end()))
+    if (offsets->count != 1 || hints.has("force_uncompressed"))
       decodeUncompressed(input, width, height, size);
     else
       decodeCompressed(input, width, height);
@@ -90,9 +92,9 @@ RawImage OrfDecoder::decodeRawInternal() {
 
 void OrfDecoder::decodeUncompressed(ByteStream& s, uint32 w, uint32 h, uint32 size) {
   UncompressedDecompressor u(s, mRaw, uncorrectedRawValues);
-  if ((hints.find(string("packed_with_control")) != hints.end()))
+  if (hints.has("packed_with_control"))
     u.decode12BitRawWithControl(w, h);
-  else if ((hints.find(string("jpeg32_bitorder")) != hints.end())) {
+  else if (hints.has("jpeg32_bitorder")) {
     iPoint2D dimensions(w, h), pos(0, 0);
     u.readUncompressedRaw(dimensions, pos, w * 12 / 8, 12, BitOrder_Jpeg32);
   } else if (size >= w*h*2) { // We're in an unpacked raw
@@ -103,7 +105,7 @@ void OrfDecoder::decodeUncompressed(ByteStream& s, uint32 w, uint32 h, uint32 si
   } else if (size >= w*h*3/2) { // We're in one of those weird interlaced packed raws
     u.decode12BitRawBEInterlaced(w, h);
   } else {
-    ThrowRDE("ORF Decoder: Don't know how to handle the encoding in this file\n");
+    ThrowRDE("Don't know how to handle the encoding in this file\n");
   }
 }
 
@@ -175,7 +177,7 @@ void OrfDecoder::decodeCompressed(ByteStream& s, uint32 w, uint32 h) {
           pred = dest[-pitch+((int)x)];
           nw0 = pred;
         }
-        dest[x] = pred + ((diff << 2) | low);
+        dest[x] = pred + ((diff * 4) | low);
         // Set predictor
         left0 = dest[x];
       } else {
@@ -184,8 +186,9 @@ void OrfDecoder::decodeCompressed(ByteStream& s, uint32 w, uint32 h) {
         int up  = dest[-pitch+((int)x)];
         int leftMinusNw = left0 - nw0;
         int upMinusNw = up - nw0;
-        // Check if sign is different, and one is not zero
-        if (leftMinusNw * upMinusNw < 0) {
+        // Check if sign is different, and they are both not zero
+        if ((signbit(leftMinusNw) ^ signbit(upMinusNw)) &&
+            (leftMinusNw != 0 && upMinusNw != 0)) {
           if (abs(leftMinusNw) > 32 || abs(upMinusNw) > 32)
             pred = left0 + upMinusNw;
           else
@@ -193,7 +196,7 @@ void OrfDecoder::decodeCompressed(ByteStream& s, uint32 w, uint32 h) {
         } else
           pred = abs(leftMinusNw) > abs(upMinusNw) ? left0 : up;
 
-        dest[x] = pred + ((diff << 2) | low);
+        dest[x] = pred + ((diff * 4) | low);
         // Set predictors
         left0 = dest[x];
         nw0 = up;
@@ -231,14 +234,15 @@ void OrfDecoder::decodeCompressed(ByteStream& s, uint32 w, uint32 h) {
           pred = dest[-pitch+((int)x)];
           nw1 = pred;
         }
-        dest[x] = left1 = pred + ((diff << 2) | low);
+        dest[x] = left1 = pred + ((diff * 4) | low);
       } else {
         int up  = dest[-pitch+((int)x)];
         int leftMinusNw = left1 - nw1;
         int upMinusNw = up - nw1;
 
-        // Check if sign is different, and one is not zero
-        if (leftMinusNw * upMinusNw < 0) {
+        // Check if sign is different, and they are both not zero
+        if ((signbit(leftMinusNw) ^ signbit(upMinusNw)) &&
+            (leftMinusNw != 0 && upMinusNw != 0)) {
           if (abs(leftMinusNw) > 32 || abs(upMinusNw) > 32)
             pred = left1 + upMinusNw;
           else
@@ -246,7 +250,7 @@ void OrfDecoder::decodeCompressed(ByteStream& s, uint32 w, uint32 h) {
         } else
           pred = abs(leftMinusNw) > abs(upMinusNw) ? left1 : up;
 
-        dest[x] = left1 = pred + ((diff << 2) | low);
+        dest[x] = left1 = pred + ((diff * 4) | low);
         nw1 = up;
       }
       border = y_border;
@@ -254,7 +258,7 @@ void OrfDecoder::decodeCompressed(ByteStream& s, uint32 w, uint32 h) {
   }
 }
 
-void OrfDecoder::decodeMetaDataInternal(CameraMetaData *meta) {
+void OrfDecoder::decodeMetaDataInternal(const CameraMetaData* meta) {
   int iso = 0;
   mRaw->cfa.setCFA(iPoint2D(2,2), CFA_RED, CFA_GREEN, CFA_GREEN, CFA_BLUE);
 

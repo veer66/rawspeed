@@ -53,7 +53,7 @@ RawImageDataFloat::RawImageDataFloat() {
       /* Process horizontal area */
       if (!area.isVertical) {
         if ((int)area.offset+(int)area.size > uncropped_dim.y)
-          ThrowRDE("RawImageData::calculateBlackAreas: Offset + size is larger than height of image");
+          ThrowRDE("Offset + size is larger than height of image");
         for (uint32 y = area.offset; y < area.offset+area.size; y++) {
           auto *pixel = (float *)getDataUncropped(mOffset.x, y);
           for (int x = mOffset.x; x < dim.x+mOffset.x; x++) {
@@ -66,7 +66,7 @@ RawImageDataFloat::RawImageDataFloat() {
       /* Process vertical area */
       if (area.isVertical) {
         if ((int)area.offset+(int)area.size > uncropped_dim.x)
-          ThrowRDE("RawImageData::calculateBlackAreas: Offset + size is larger than width of image");
+          ThrowRDE("Offset + size is larger than width of image");
         for (int y = mOffset.y; y < dim.y+mOffset.y; y++) {
           auto *pixel = (float *)getDataUncropped(area.offset, y);
           for (uint32 x = area.offset; x < area.size+area.offset; x++) {
@@ -339,7 +339,7 @@ void RawImageDataFloat::fixBadPixel( uint32 x, uint32 y, int component )
   // Find y weights
   float total_dist_y = dist[2] + dist[3];
   if (total_dist_y) {
-    weight[2] = dist[2] > 0.0f ? (total_dist_x - dist[2]) / total_dist_y : 0;
+    weight[2] = dist[2] > 0.0f ? (total_dist_y - dist[2]) / total_dist_y : 0;
     weight[3] = 1.0f - weight[2];
     total_div += 1;
   }

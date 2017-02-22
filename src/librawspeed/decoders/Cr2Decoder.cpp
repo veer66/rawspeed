@@ -23,19 +23,19 @@
 #include "decoders/Cr2Decoder.h"
 #include "common/Common.h"                 // for ushort16, clampBits, uint32
 #include "common/Point.h"                  // for iPoint2D
-#include "decoders/RawDecoderException.h"  // for ThrowRDE, RawDecoderExcep...
+#include "decoders/RawDecoderException.h"  // for RawDecoderException, Thro...
 #include "decompressors/Cr2Decompressor.h" // for Cr2Decompressor
 #include "io/ByteStream.h"                 // for ByteStream
+#include "io/Endianness.h"                 // for getHostEndianness, Endian...
 #include "io/IOException.h"                // for IOException
+#include "metadata/Camera.h"               // for Hints
 #include "metadata/ColorFilterArray.h"     // for CFAColor::CFA_GREEN, CFAC...
 #include "parsers/TiffParserException.h"   // for ThrowTPE
 #include "tiff/TiffEntry.h"                // for TiffEntry, TiffDataType::...
 #include "tiff/TiffTag.h"                  // for TiffTag, TiffTag::CANONCO...
 #include <exception>                       // for exception
-#include <map>                             // for map, _Rb_tree_iterator
 #include <memory>                          // for unique_ptr, allocator
-#include <string>                          // for string, stoi
-#include <utility>                         // for pair
+#include <string>                          // for string
 #include <vector>                          // for vector
 // IWYU pragma: no_include <ext/alloc_traits.h>
 
@@ -51,7 +51,7 @@ RawImage Cr2Decoder::decodeOldFormat() {
     // D2000 is oh so special...
     auto ifd = mRootIFD->getIFDWithTag(CFAPATTERN);
     if (! ifd->hasEntry(STRIPOFFSETS))
-      ThrowRDE("CR2 Decoder: Couldn't find offset");
+      ThrowRDE("Couldn't find offset");
 
     offset = ifd->getEntry(STRIPOFFSETS)->getU32();
   }
@@ -101,7 +101,7 @@ RawImage Cr2Decoder::decodeOldFormat() {
 RawImage Cr2Decoder::decodeNewFormat() {
   TiffEntry* sensorInfoE = mRootIFD->getEntryRecursive(CANON_SENSOR_INFO);
   if (!sensorInfoE)
-    ThrowTPE("Cr2Decoder: failed to get SensorInfo from MakerNote");
+    ThrowTPE("failed to get SensorInfo from MakerNote");
   iPoint2D dim(sensorInfoE->getU16(1), sensorInfoE->getU16(2));
 
   int componentsPerPixel = 1;
@@ -147,7 +147,7 @@ RawImage Cr2Decoder::decodeRawInternal() {
     return decodeNewFormat();
 }
 
-void Cr2Decoder::checkSupportInternal(CameraMetaData *meta) {
+void Cr2Decoder::checkSupportInternal(const CameraMetaData* meta) {
   auto id = mRootIFD->getID();
   // Check for sRaw mode
   if (mRootIFD->getSubIFDs().size() == 4) {
@@ -161,7 +161,7 @@ void Cr2Decoder::checkSupportInternal(CameraMetaData *meta) {
   checkCameraSupported(meta, id, "");
 }
 
-void Cr2Decoder::decodeMetaDataInternal(CameraMetaData *meta) {
+void Cr2Decoder::decodeMetaDataInternal(const CameraMetaData* meta) {
   int iso = 0;
   mRaw->cfa.setCFA(iPoint2D(2,2), CFA_RED, CFA_GREEN, CFA_GREEN, CFA_BLUE);
 
@@ -181,13 +181,8 @@ void Cr2Decoder::decodeMetaDataInternal(CameraMetaData *meta) {
     if (mRootIFD->hasEntryRecursive(CANONCOLORDATA)) {
       TiffEntry *wb = mRootIFD->getEntryRecursive(CANONCOLORDATA);
       // this entry is a big table, and different cameras store used WB in
-      // different parts, so find the offset, starting with the most common one
-      int offset = 126;
-
-      // replace it with a hint if it exists
-      if (hints.find("wb_offset") != hints.end()) {
-        offset = stoi(hints.find("wb_offset")->second);
-      }
+      // different parts, so find the offset, default is the most common one
+      int offset = hints.get("wb_offset", 126);
 
       offset /= 2;
       mRaw->metadata.wbCoeffs[0] = (float) wb->getU16(offset + 0);
@@ -224,14 +219,14 @@ void Cr2Decoder::decodeMetaDataInternal(CameraMetaData *meta) {
 }
 
 int Cr2Decoder::getHue() {
-  if (hints.find("old_sraw_hue") != hints.end())
+  if (hints.has("old_sraw_hue"))
     return (mRaw->metadata.subsampling.y * mRaw->metadata.subsampling.x);
 
   if (!mRootIFD->hasEntryRecursive((TiffTag)0x10)) {
     return 0;
   }
   uint32 model_id = mRootIFD->getEntryRecursive((TiffTag)0x10)->getU32();
-  if (model_id >= 0x80000281 || model_id == 0x80000218 || (hints.find("force_new_sraw_hue") != hints.end()))
+  if (model_id >= 0x80000281 || model_id == 0x80000218 || (hints.has("force_new_sraw_hue")))
     return ((mRaw->metadata.subsampling.y * mRaw->metadata.subsampling.x) - 1) >> 1;
 
   return (mRaw->metadata.subsampling.y * mRaw->metadata.subsampling.x);
@@ -414,7 +409,7 @@ inline void YUV_TO_RGB<0>(int Y, int Cb, int Cr, const int* sraw_coeffs,
                           ushort16* X, int offset) {
   int r, g, b;
   r = sraw_coeffs[0] * (Y + Cr - 512);
-  g = sraw_coeffs[1] * (Y + ((-778 * Cb - (Cr << 11)) >> 12) - 512);
+  g = sraw_coeffs[1] * (Y + ((-778 * Cb - (Cr * 2048)) >> 12) - 512);
   b = sraw_coeffs[2] * (Y + (Cb - 512));
   STORE_RGB(X, r, g, b, offset);
 }
@@ -433,18 +428,17 @@ inline void YUV_TO_RGB<2>(int Y, int Cb, int Cr, const int* sraw_coeffs,
                           ushort16* X, int offset) {
   int r, g, b;
   r = sraw_coeffs[0] * (Y + Cr);
-  g = sraw_coeffs[1] * (Y + ((-778 * Cb - (Cr << 11)) >> 12));
+  g = sraw_coeffs[1] * (Y + ((-778 * Cb - (Cr * 2048)) >> 12));
   b = sraw_coeffs[2] * (Y + Cb);
   STORE_RGB(X, r, g, b, offset);
 }
 
 // Interpolate and convert sRaw data.
 void Cr2Decoder::sRawInterpolate() {
-  vector<const TiffIFD*> data = mRootIFD->getIFDsWithTag(CANONCOLORDATA);
-  if (data.empty())
-    ThrowRDE("CR2 sRaw: Unable to locate WB info.");
+  TiffEntry* wb = mRootIFD->getEntryRecursive(CANONCOLORDATA);
+  if (!wb)
+    ThrowRDE("Unable to locate WB info.");
 
-  TiffEntry* wb = data[0]->getEntry(CANONCOLORDATA);
   // Offset to sRaw coefficients used to reconstruct uncorrected RGB data.
   uint32 offset = 78;
 
@@ -454,14 +448,14 @@ void Cr2Decoder::sRawInterpolate() {
       (wb->getU16(offset + 1) + wb->getU16(offset + 2) + 1) >> 1;
   sraw_coeffs[2] = wb->getU16(offset + 3);
 
-  if (hints.find("invert_sraw_wb") != hints.end()) {
+  if (hints.has("invert_sraw_wb")) {
     sraw_coeffs[0] = (int)(1024.0f / ((float)sraw_coeffs[0] / 1024.0f));
     sraw_coeffs[2] = (int)(1024.0f / ((float)sraw_coeffs[2] / 1024.0f));
   }
 
   /* Determine sRaw coefficients */
-  bool isOldSraw = hints.find("sraw_40d") != hints.end();
-  bool isNewSraw = hints.find("sraw_new") != hints.end();
+  bool isOldSraw = hints.has("sraw_40d");
+  bool isNewSraw = hints.has("sraw_new");
 
   const auto& subSampling = mRaw->metadata.subsampling;
   int width = mRaw->dim.x / subSampling.x;
@@ -480,8 +474,7 @@ void Cr2Decoder::sRawInterpolate() {
     else
       interpolate_420<1>(getHue(), mRaw, sraw_coeffs, width, height, 0, height);
   } else
-    ThrowRDE("CR2 Decoder: Unknown subsampling: (%i; %i)", subSampling.x,
-             subSampling.y);
+    ThrowRDE("Unknown subsampling: (%i; %i)", subSampling.x, subSampling.y);
 }
 
 } // namespace RawSpeed

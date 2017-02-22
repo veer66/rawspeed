@@ -45,8 +45,8 @@ public:
     : AbstractTiffDecoder(move(root), file) {}
 
   RawImage decodeRawInternal() override;
-  void decodeMetaDataInternal(CameraMetaData *meta) override;
-  void checkSupportInternal(CameraMetaData *meta) override;
+  void decodeMetaDataInternal(const CameraMetaData* meta) override;
+  void checkSupportInternal(const CameraMetaData* meta) override;
 
 private:
   int getDecoderVersion() const override { return 5; }
@@ -67,7 +67,6 @@ private:
 class NefSlice {
 public:
   NefSlice() { h = offset = count = 0; }
-  ~NefSlice() = default;
   uint32 h;
   uint32 offset;
   uint32 count;

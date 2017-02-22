@@ -20,6 +20,8 @@
 
 #pragma once
 
+#include "rawspeedconfig.h"
+
 #include "common/Common.h"             // for uint32, uchar8, ushort16, wri...
 #include "common/Point.h"              // for iPoint2D, iRectangle2D (ptr o...
 #include "common/Threading.h"          // for pthread_mutex_t, pthread_attr_t
@@ -43,14 +45,14 @@ public:
   };
 
   RawImageWorker(RawImageData *img, RawImageWorkerTask task, int start_y, int end_y);
+#ifdef HAVE_PTHREAD
   ~RawImageWorker();
-#ifndef NO_PTHREAD
   void startThread();
   void waitForThread();
 #endif
   void performTask();
 protected:
-#ifndef NO_PTHREAD
+#ifdef HAVE_PTHREAD
   pthread_t threadid;
   pthread_attr_t attr;
 #endif
@@ -113,7 +115,7 @@ public:
   uint32 getBpp() const { return bpp; }
   void setCpp(uint32 val);
   void createData();
-  virtual void destroyData();
+  void destroyData();
   void blitFrom(const RawImage& src, const iPoint2D& srcPos,
                 const iPoint2D& size, const iPoint2D& destPos);
   RawSpeed::RawImageType getDataType() const { return dataType; }
@@ -122,8 +124,8 @@ public:
   uchar8* getDataUncropped(uint32 x, uint32 y);
   void subFrame(iRectangle2D cropped);
   void clearArea(iRectangle2D area, uchar8 value = 0);
-  iPoint2D getUncroppedDim();
-  iPoint2D getCropOffset();
+  iPoint2D __attribute__((pure)) getUncroppedDim() const;
+  iPoint2D __attribute__((pure)) getCropOffset() const;
   virtual void scaleBlackWhite() = 0;
   virtual void calculateBlackAreas() = 0;
   virtual void setWithLookUp(ushort16 value, uchar8* dst, uint32* random) = 0;
@@ -138,26 +140,27 @@ public:
   bool isAllocated() {return !!data;}
   void createBadPixelMap();
   iPoint2D dim;
-  uint32 pitch;
+  uint32 pitch = 0;
   bool isCFA{true};
   ColorFilterArray cfa;
-  int blackLevel{-1};
+  int blackLevel = -1;
   int blackLevelSeparate[4];
-  int whitePoint{65536};
+  int whitePoint = 65536;
   std::vector<BlackArea> blackAreas;
   /* Vector containing silent errors that occurred doing decoding, that may have lead to */
   /* an incomplete image. */
-  std::vector<const char*> errors;
-  void setError(const char* err);
+  std::vector<std::string> errors;
+  void setError(const std::string& err);
   /* Vector containing the positions of bad pixels */
   /* Format is x | (y << 16), so maximum pixel position is 65535 */
   std::vector<uint32> mBadPixelPositions;    // Positions of zeroes that must be interpolated
-  uchar8 *mBadPixelMap;
-  uint32 mBadPixelMapPitch;
-  bool mDitherScale;           // Should upscaling be done with dither to minimize banding?
+  uchar8* mBadPixelMap = nullptr;
+  uint32 mBadPixelMapPitch = 0;
+  bool mDitherScale =
+      true; // Should upscaling be done with dither to minimize banding?
   ImageMetaData metadata;
 
-#ifndef NO_PTHREAD
+#ifdef HAVE_PTHREAD
   pthread_mutex_t errMutex;   // Mutex for 'errors'
   pthread_mutex_t mBadPixelMutex;   // Mutex for 'mBadPixelPositions, must be used if more than 1 thread is accessing vector
 #endif
@@ -171,15 +174,15 @@ protected:
   virtual void fixBadPixel( uint32 x, uint32 y, int component = 0) = 0;
   void fixBadPixelsThread(int start_y, int end_y);
   void startWorker(RawImageWorker::RawImageWorkerTask task, bool cropped );
-  uint32 dataRefCount{0};
-  uchar8 *data{nullptr};
-  uint32 cpp{1}; // Components per pixel
-  uint32 bpp{0}; // Bytes per pixel.
+  uint32 dataRefCount = 0;
+  uchar8* data = nullptr;
+  uint32 cpp = 1; // Components per pixel
+  uint32 bpp = 0; // Bytes per pixel.
   friend class RawImage;
   iPoint2D mOffset;
   iPoint2D uncropped_dim;
-  TableLookUp *table{nullptr};
-#ifndef NO_PTHREAD
+  TableLookUp* table = nullptr;
+#ifdef HAVE_PTHREAD
   pthread_mutex_t mymutex;
 #endif
 };

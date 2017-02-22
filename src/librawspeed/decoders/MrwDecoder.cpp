@@ -20,19 +20,19 @@
 */
 
 #include "decoders/MrwDecoder.h"
-#include "common/Common.h"                          // for getU16BE, getU32BE
+#include "common/Common.h"                          // for uchar8, uint32
 #include "common/Point.h"                           // for iPoint2D
 #include "decoders/RawDecoderException.h"           // for ThrowRDE
 #include "decompressors/UncompressedDecompressor.h" // for UncompressedDeco...
+#include "io/Endianness.h"                          // for getU16BE, getU32BE
 #include "io/IOException.h"                         // for IOException
+#include "metadata/Camera.h"                        // for Hints
 #include "parsers/TiffParser.h"                     // for parseTiff
 #include "tiff/TiffEntry.h"                         // IWYU pragma: keep
 #include "tiff/TiffIFD.h"                           // for TiffID, TiffRoot...
 #include <algorithm>                                // for max
 #include <cmath>                                    // for NAN
-#include <map>                                      // for map, _Rb_tree_it...
 #include <memory>                                   // for unique_ptr
-#include <string>                                   // for string
 
 using namespace std;
 
@@ -62,7 +62,7 @@ void MrwDecoder::parseHeader() {
   data = mFile->getData(0,data_offset);
 
   if (!mFile->isValid(data_offset))
-    ThrowRDE("MRW: Data offset is invalid");
+    ThrowRDE("Data offset is invalid");
 
   // Make sure all values have at least been initialized
   raw_width = raw_height = packed = 0;
@@ -78,6 +78,7 @@ void MrwDecoder::parseHeader() {
       raw_height = getU16BE(data + currpos + 16);
       raw_width = getU16BE(data + currpos + 18);
       packed = (data[currpos+24] == 12);
+      break;
     case 0x574247: // WBG
       for (uint32 i = 0; i < 4; i++)
         wb_coeffs[i] = (float)getU16BE(data + currpos + 12 + i * 2);
@@ -110,22 +111,22 @@ RawImage MrwDecoder::decodeRawInternal() {
   return mRaw;
 }
 
-void MrwDecoder::checkSupportInternal(CameraMetaData *meta) {
+void MrwDecoder::checkSupportInternal(const CameraMetaData* meta) {
   auto id = rootIFD->getID();
   this->checkCameraSupported(meta, id.make, id.model, "");
 }
 
-void MrwDecoder::decodeMetaDataInternal(CameraMetaData *meta) {
+void MrwDecoder::decodeMetaDataInternal(const CameraMetaData* meta) {
   //Default
   int iso = 0;
 
   if (!rootIFD)
-    ThrowRDE("MRW: Couldn't find make and model");
+    ThrowRDE("Couldn't find make and model");
 
   auto id = rootIFD->getID();
   setMetaData(meta, id.make, id.model, "", iso);
 
-  if (hints.find("swapped_wb") != hints.end()) {
+  if (hints.has("swapped_wb")) {
     mRaw->metadata.wbCoeffs[0] = (float) wb_coeffs[2];
     mRaw->metadata.wbCoeffs[1] = (float) wb_coeffs[0];
     mRaw->metadata.wbCoeffs[2] = (float) wb_coeffs[1];

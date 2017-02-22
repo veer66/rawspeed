@@ -17,8 +17,6 @@
     along with darktable.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-#include "config.h"
-
 #include "RawSpeed-API.h" // for RawImage, RawImageData, iPoint2D, ImageMet...
 
 #include <cstddef>    // for size_t
@@ -122,7 +120,8 @@ int main(int argc, char *argv[]) {
   // fprintf(stderr, "Using cameras.xml from '%s'\n", camfile);
 
   try {
-    std::unique_ptr<CameraMetaData> meta(new CameraMetaData(camfile.c_str()));
+    std::unique_ptr<const CameraMetaData> meta(
+        new CameraMetaData(camfile.c_str()));
 
     if (!meta.get()) {
       fprintf(stderr, "ERROR: Couldn't get a CameraMetaData instance\n");
@@ -168,7 +167,7 @@ int main(int argc, char *argv[]) {
     d->decodeMetaData(meta.get());
     r = d->mRaw;
     for (auto &error : r->errors)
-      fprintf(stderr, "WARNING: [rawspeed] %s\n", error);
+      fprintf(stderr, "WARNING: [rawspeed] %s\n", error.c_str());
 
     fprintf(stdout, "blackLevel: %d\n", r->blackLevel);
     fprintf(stdout, "whitePoint: %d\n", r->whitePoint);

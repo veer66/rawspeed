@@ -41,12 +41,7 @@ class Camera;
 
 class RawDecoder;
 
-RawParser::RawParser(FileMap* inputData): mInput(inputData) {
-}
-
-RawParser::~RawParser() = default;
-
-RawDecoder* RawParser::getDecoder(CameraMetaData* meta) {
+RawDecoder* RawParser::getDecoder(const CameraMetaData* meta) {
   // We need some data.
   // For now it is 104 bytes for RAF/FUJIFIM images.
   // FIXME: each decoder/parser should check it on their own.
@@ -100,7 +95,7 @@ RawDecoder* RawParser::getDecoder(CameraMetaData* meta) {
 
   // Detect camera on filesize (CHDK).
   if (meta != nullptr && meta->hasChdkCamera(mInput->getSize())) {
-    Camera* c = meta->getChdkCamera(mInput->getSize());
+    const Camera* c = meta->getChdkCamera(mInput->getSize());
 
     try {
       return new NakedDecoder(mInput, c);

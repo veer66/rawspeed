@@ -201,7 +201,10 @@ public:
     }
   }
 
-  inline static int signExtended(uint32 diff, uint32 len) {
+  // WARNING: the caller should check that len != 0 before calling the function
+  inline static int __attribute__((const))
+  signExtended(uint32 diff, uint32 len) {
+    int32 ret = diff;
 #if 0
 #define _X(x) (1<<x)-1
     constexpr static int offset[16] = {
@@ -209,12 +212,12 @@ public:
       _X(8), _X(9), _X(10), _X(11), _X(12), _X(13), _X(14), _X(15)};
 #undef _X
     if ((diff & (1 << (len - 1))) == 0)
-      diff -= offset[len];
+      ret -= offset[len];
 #else
     if ((diff & (1 << (len - 1))) == 0)
-      diff -= (1 << len) - 1;
+      ret -= (1 << len) - 1;
 #endif
-    return diff;
+    return ret;
   }
 
   template<typename BIT_STREAM> inline int decodeLength(BIT_STREAM& bs) const {
@@ -260,8 +263,7 @@ public:
     }
 
     if (code > maxCodeOL[code_l])
-      ThrowRDE("Corrupt JPEG data: bad Huffman code: %u (len: %u)", code,
-               code_l);
+      ThrowRDE("bad Huffman code: %u (len: %u)", code, code_l);
 
     int diff_l = codeValues[code - codeOffsetOL[code_l]];
 

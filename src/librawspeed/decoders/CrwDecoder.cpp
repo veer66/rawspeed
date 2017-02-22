@@ -25,7 +25,9 @@
 #include "common/Memory.h"                // for alignedFree, alignedMalloc...
 #include "common/Point.h"                 // for iPoint2D
 #include "decoders/RawDecoderException.h" // for ThrowRDE
+#include "decompressors/HuffmanTable.h"   // for HuffmanTable::signExtend
 #include "io/ByteStream.h"                // for ByteStream
+#include "metadata/Camera.h"              // for Hints
 #include "metadata/ColorFilterArray.h"    // for CFAColor::CFA_GREEN, CFACo...
 #include "tiff/CiffEntry.h"               // for CiffEntry, CiffDataType::C...
 #include "tiff/CiffIFD.h"                 // for CiffIFD
@@ -36,10 +38,7 @@
 #include <cstdlib>                        // for abs
 #include <cstring>                        // for memset
 #include <exception>                      // for exception
-#include <map>                            // for map, _Rb_tree_iterator
-#include <sstream>                        // for basic_istream::operator>>
 #include <string>                         // for string
-#include <utility>                        // for pair
 #include <vector>                         // for vector
 
 using namespace std;
@@ -70,35 +69,35 @@ RawImage CrwDecoder::decodeRawInternal() {
   CiffEntry *sensorInfo = mRootIFD->getEntryRecursive(CIFF_SENSORINFO);
 
   if (!sensorInfo || sensorInfo->count < 6 || sensorInfo->type != CIFF_SHORT)
-    ThrowRDE("CRW: Couldn't find image sensor info");
+    ThrowRDE("Couldn't find image sensor info");
 
   uint32 width = sensorInfo->getU16(1);
   uint32 height = sensorInfo->getU16(2);
 
   CiffEntry *decTable = mRootIFD->getEntryRecursive(CIFF_DECODERTABLE);
   if (!decTable || decTable->type != CIFF_LONG)
-    ThrowRDE("CRW: Couldn't find decoder table");
+    ThrowRDE("Couldn't find decoder table");
 
   uint32 dec_table = decTable->getU32();
   if (dec_table > 2)
-    ThrowRDE("CRW: Unknown decoder table %d", dec_table);
+    ThrowRDE("Unknown decoder table %d", dec_table);
 
   mRaw->dim = iPoint2D(width, height);
   mRaw->createData();
 
-  bool lowbits = hints.find("no_decompressed_lowbits") == hints.end();
+  bool lowbits = ! hints.has("no_decompressed_lowbits");
   decodeRaw(lowbits, dec_table, width, height);
 
   return mRaw;
 }
 
-void CrwDecoder::checkSupportInternal(CameraMetaData *meta) {
+void CrwDecoder::checkSupportInternal(const CameraMetaData* meta) {
   vector<CiffIFD*> data = mRootIFD->getIFDsWithTag(CIFF_MAKEMODEL);
   if (data.empty())
-    ThrowRDE("CRW Support check: Model name not found");
+    ThrowRDE("Model name not found");
   vector<string> makemodel = data[0]->getEntry(CIFF_MAKEMODEL)->getStrings();
   if (makemodel.size() < 2)
-    ThrowRDE("CRW Support check: wrong number of strings for make/model");
+    ThrowRDE("wrong number of strings for make/model");
   string make = makemodel[0];
   string model = makemodel[1];
 
@@ -122,15 +121,15 @@ static float canonEv(const long in) {
   return copysignf((val + frac) / 32.0f, in);
 }
 
-void CrwDecoder::decodeMetaDataInternal(CameraMetaData *meta) {
+void CrwDecoder::decodeMetaDataInternal(const CameraMetaData* meta) {
   int iso = 0;
   mRaw->cfa.setCFA(iPoint2D(2,2), CFA_RED, CFA_GREEN, CFA_GREEN, CFA_BLUE);
   vector<CiffIFD*> data = mRootIFD->getIFDsWithTag(CIFF_MAKEMODEL);
   if (data.empty())
-    ThrowRDE("CRW Support check: Model name not found");
+    ThrowRDE("Model name not found");
   vector<string> makemodel = data[0]->getEntry(CIFF_MAKEMODEL)->getStrings();
   if (makemodel.size() < 2)
-    ThrowRDE("CRW Support check: wrong number of strings for make/model");
+    ThrowRDE("wrong number of strings for make/model");
   string make = makemodel[0];
   string model = makemodel[1];
   string mode;
@@ -156,15 +155,10 @@ void CrwDecoder::decodeMetaDataInternal(CameraMetaData *meta) {
         mRaw->metadata.wbCoeffs[2] = (float) (1024.0 /wb->getByte(75));
       } else if (wb->type == CIFF_BYTE && wb->count > 768) { // Other G series and S series cameras
         // correct offset for most cameras
-        int offset = 120;
-        // check for the hint that we need to use other offset
-        if (hints.find("wb_offset") != hints.end()) {
-          stringstream wb_offset(hints.find("wb_offset")->second);
-          wb_offset >> offset;
-        }
+        int offset = hints.get("wb_offset", 120);
 
         ushort16 key[] = { 0x410, 0x45f3 };
-        if (hints.find("wb_mangle") == hints.end())
+        if (! hints.has("wb_mangle"))
           key[0] = key[1] = 0;
 
         offset /= 2;
@@ -193,8 +187,9 @@ void CrwDecoder::decodeMetaDataInternal(CameraMetaData *meta) {
       ushort16 wb_index = shot_info->getU16(7);
       CiffEntry *wb_data = mRootIFD->getEntryRecursive(CIFF_WHITEBALANCE);
       /* CANON EOS D60, CANON EOS 10D, CANON EOS 300D */
-      int wb_offset = (wb_index < 18) ? "0134567028"[wb_index]-'0' : 0;
-      wb_offset = 1+wb_offset*4;
+      if (wb_index > 9)
+        ThrowRDE("CrwDecoder: invalid white balance index");
+      int wb_offset = 1 + ("0134567028"[wb_index]-'0') * 4;
       mRaw->metadata.wbCoeffs[0] = wb_data->getU16(wb_offset + 0);
       mRaw->metadata.wbCoeffs[1] = wb_data->getU16(wb_offset + 1);
       mRaw->metadata.wbCoeffs[2] = wb_data->getU16(wb_offset + 3);
@@ -244,7 +239,7 @@ void CrwDecoder::makeDecoder (int n, const uchar8 *source)
   const uchar8 *count;
 
   if (n > 1) {
-    ThrowRDE("CRW: Invalid table number specified");
+    ThrowRDE("Invalid table number specified");
   }
 
   count = (source += 16) - 17;
@@ -258,7 +253,7 @@ void CrwDecoder::makeDecoder (int n, const uchar8 *source)
   auto* huff = (ushort16*)alignedMallocArray<16, ushort16, true>(1UL + (1UL << max));
 
   if (!huff)
-    ThrowRDE("CRW: Couldn't allocate table");
+    ThrowRDE("Couldn't allocate table");
 
   huff[0] = max;
   for (h = len = 1; len <= max; len++) {
@@ -366,8 +361,7 @@ void CrwDecoder::decodeRaw(bool lowbits, uint32 dec_table, uint32 width, uint32 
         len = leaf & 15;
         if (len == 0) continue;
         diff = pump.getBitsSafe(len);
-        if ((diff & (1 << (len-1))) == 0)
-          diff -= (1 << len) - 1;
+        diff = HuffmanTable::signExtended(diff, len);
         if (i < 64) diffbuf[i] = diff;
       }
       diffbuf[0] += carry;
@@ -376,7 +370,7 @@ void CrwDecoder::decodeRaw(bool lowbits, uint32 dec_table, uint32 width, uint32 
         if (pnum++ % width == 0)
           base[0] = base[1] = 512;
         if ((dest[(block << 6) + i] = base[i & 1] += diffbuf[i]) >> 10)
-          ThrowRDE("CRW: Error decompressing");
+          ThrowRDE("Error decompressing");
       }
     }
 

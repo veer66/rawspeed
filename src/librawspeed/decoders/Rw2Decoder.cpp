@@ -26,6 +26,7 @@
 #include "decoders/RawDecoderException.h"           // for ThrowRDE
 #include "decompressors/UncompressedDecompressor.h" // for UncompressedDeco...
 #include "io/ByteStream.h"                          // for ByteStream
+#include "metadata/Camera.h"                        // for Hints
 #include "metadata/ColorFilterArray.h"              // for CFAColor::CFA_GREEN
 #include "tiff/TiffEntry.h"                         // for TiffEntry
 #include "tiff/TiffIFD.h"                           // for TiffIFD, TiffRoo...
@@ -33,7 +34,6 @@
 #include <algorithm>                                // for min, move
 #include <cmath>                                    // for fabs
 #include <cstring>                                  // for memcpy
-#include <map>                                      // for map, _Rb_tree_it...
 #include <memory>                                   // for unique_ptr
 #include <pthread.h>                                // for pthread_mutex_lock
 #include <string>                                   // for string, allocator
@@ -66,7 +66,7 @@ struct PanaBitpump
     int blocks = (bytes / BufSize) * BufSize;
     input.skipBytes(blocks);
     for (int i = blocks; i < bytes; i++)
-      getBits(8);
+      (void)getBits(8);
   }
 
   uint32 getBits(int nbits)
@@ -106,11 +106,11 @@ RawImage Rw2Decoder::decodeRawInternal() {
     TiffEntry *offsets = raw->getEntry(STRIPOFFSETS);
 
     if (offsets->count != 1) {
-      ThrowRDE("RW2 Decoder: Multiple Strips found: %u", offsets->count);
+      ThrowRDE("Multiple Strips found: %u", offsets->count);
     }
     offset = offsets->getU32();
     if (!mFile->isValid(offset))
-      ThrowRDE("Panasonic RAW Decoder: Invalid image data offset, cannot decode.");
+      ThrowRDE("Invalid image data offset, cannot decode.");
 
     mRaw->dim = iPoint2D(width, height);
     mRaw->createData();
@@ -137,13 +137,13 @@ RawImage Rw2Decoder::decodeRawInternal() {
     TiffEntry *offsets = raw->getEntry(PANASONIC_STRIPOFFSET);
 
     if (offsets->count != 1) {
-      ThrowRDE("RW2 Decoder: Multiple Strips found: %u", offsets->count);
+      ThrowRDE("Multiple Strips found: %u", offsets->count);
     }
 
     offset = offsets->getU32();
 
     if (!mFile->isValid(offset))
-      ThrowRDE("RW2 Decoder: Invalid image data offset, cannot decode.");
+      ThrowRDE("Invalid image data offset, cannot decode.");
 
     load_flags = 0x2008;
     DecodeRw2();
@@ -161,9 +161,7 @@ void Rw2Decoder::decodeThreaded(RawDecoderThread * t) {
   int w = mRaw->dim.x / 14;
   uint32 y;
 
-  bool zero_is_bad = true;
-  if (hints.find("zero_is_not_bad") != hints.end())
-    zero_is_bad = false;
+  bool zero_is_bad = ! hints.has("zero_is_not_bad");
 
   /* 9 + 1/7 bits per pixel */
   int skip = w * 14 * t->start_y * 9;
@@ -228,13 +226,13 @@ void Rw2Decoder::decodeThreaded(RawDecoderThread * t) {
   }
 }
 
-void Rw2Decoder::checkSupportInternal(CameraMetaData *meta) {
+void Rw2Decoder::checkSupportInternal(const CameraMetaData* meta) {
   auto id = mRootIFD->getID();
   if (!checkCameraSupported(meta, id, guessMode()))
     checkCameraSupported(meta, id, "");
 }
 
-void Rw2Decoder::decodeMetaDataInternal(CameraMetaData *meta) {
+void Rw2Decoder::decodeMetaDataInternal(const CameraMetaData* meta) {
   mRaw->cfa.setCFA(iPoint2D(2,2), CFA_BLUE, CFA_GREEN, CFA_GREEN, CFA_RED);
 
   auto id = mRootIFD->getID();
@@ -276,7 +274,8 @@ void Rw2Decoder::decodeMetaDataInternal(CameraMetaData *meta) {
             mRaw->blackLevelSeparate[k] = blackBlue;
             break;
           default:
-            ThrowRDE("RW2 Decoder: Unexpected CFA color %s.", ColorFilterArray::colorToString(c).c_str());
+            ThrowRDE("Unexpected CFA color %s.",
+                     ColorFilterArray::colorToString(c).c_str());
             break;
         }
       }

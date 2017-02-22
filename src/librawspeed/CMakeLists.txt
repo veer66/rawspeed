@@ -18,6 +18,7 @@ endif(WIN32)
 
 add_library(rawspeed OBJECT ${RAWSPEED_SOURCES})
 
+target_include_directories(rawspeed PUBLIC ${CONFIG_INCLUDE_PATH})
 target_include_directories(rawspeed PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
 list(APPEND RAWSPEED_LIBS ${Pugixml_LIBRARIES})
@@ -35,7 +36,8 @@ if(WITH_PTHREADS AND Threads_FOUND)
 endif()
 
 add_library(rawspeed_static STATIC $<TARGET_OBJECTS:rawspeed>)
-target_include_directories(rawspeed_static PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(rawspeed_static PUBLIC "$<TARGET_PROPERTY:rawspeed,COMPILE_DEFINITIONS>")
+target_include_directories(rawspeed_static PUBLIC "$<TARGET_PROPERTY:rawspeed,INCLUDE_DIRECTORIES>")
 target_link_libraries(rawspeed_static PUBLIC ${RAWSPEED_LIBS})
 add_dependencies(rawspeed_static rawspeed)
 

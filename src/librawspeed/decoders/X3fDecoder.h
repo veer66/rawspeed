@@ -42,8 +42,8 @@ public:
   X3fDecoder(FileMap* file);
   ~X3fDecoder() override;
   RawImage decodeRawInternal() override;
-  void decodeMetaDataInternal(CameraMetaData *meta) override;
-  void checkSupportInternal(CameraMetaData *meta) override;
+  void decodeMetaDataInternal(const CameraMetaData* meta) override;
+  void checkSupportInternal(const CameraMetaData* meta) override;
   FileMap *getCompressedData() override;
   std::vector<X3fDirectory> mDirectory;
   std::vector<X3fImage> mImages;
@@ -54,7 +54,7 @@ protected:
   void decodeThreaded(RawDecoderThread *t) override;
   void readDirectory();
   std::string getId();
-  ByteStream *bytes;
+  ByteStream* bytes = nullptr;
   bool hasProp(const char* key) {
     return mProperties.props.find(key) != mProperties.props.end();
   }
@@ -65,17 +65,17 @@ protected:
   std::string getIdAsString(ByteStream *bytes);
   void SigmaSkipOne(BitPumpMSB *bits);
   bool readName();
-  X3fImage *curr_image;
+  X3fImage* curr_image = nullptr;
   int pred[3];
   uint32 plane_sizes[3];
   uint32 plane_offset[3];
   iPoint2D planeDim[3];
   uchar8 code_table[256];
   int32 big_table[1<<14];
-  uint32 *line_offsets;
-  ushort16 *huge_table;
+  uint32* line_offsets = nullptr;
+  ushort16* huge_table = nullptr;
   short curve[1024];
-  uint32 max_len;
+  uint32 max_len = 0;
   std::string camera_make;
   std::string camera_model;
 };

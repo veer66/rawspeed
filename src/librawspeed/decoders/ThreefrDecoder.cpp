@@ -24,14 +24,12 @@
 #include "common/Point.h"                         // for iPoint2D
 #include "decompressors/HasselbladDecompressor.h" // for HasselbladDecompre...
 #include "io/IOException.h"                       // for IOException
+#include "metadata/Camera.h"                      // for Hints
 #include "metadata/ColorFilterArray.h"            // for CFAColor::CFA_GREEN
 #include "tiff/TiffEntry.h"                       // for TiffEntry
 #include "tiff/TiffIFD.h"                         // for TiffRootIFD, TiffIFD
 #include "tiff/TiffTag.h"                         // for TiffTag::ASSHOTNEU...
-#include <map>                                    // for _Rb_tree_iterator
 #include <memory>                                 // for unique_ptr
-#include <string>                                 // for string, stoi
-#include <utility>                                // for pair
 
 using namespace std;
 
@@ -49,10 +47,7 @@ RawImage ThreefrDecoder::decodeRawInternal() {
   mRaw->createData();
 
   HasselbladDecompressor l(*mFile, off, mRaw);
-  int pixelBaseOffset = 0;
-  auto pixelOffsetHint = hints.find("pixelBaseOffset");
-  if (pixelOffsetHint != hints.end())
-    pixelBaseOffset = stoi(pixelOffsetHint->second);
+  int pixelBaseOffset = hints.get("pixelBaseOffset", 0);
 
   try {
     l.decode(pixelBaseOffset);
@@ -64,7 +59,7 @@ RawImage ThreefrDecoder::decodeRawInternal() {
   return mRaw;
 }
 
-void ThreefrDecoder::decodeMetaDataInternal(CameraMetaData *meta) {
+void ThreefrDecoder::decodeMetaDataInternal(const CameraMetaData* meta) {
   mRaw->cfa.setCFA(iPoint2D(2,2), CFA_RED, CFA_GREEN, CFA_GREEN, CFA_BLUE);
 
   setMetaData(meta, "", 0);

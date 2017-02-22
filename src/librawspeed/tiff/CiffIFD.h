@@ -35,13 +35,13 @@ class CiffEntry;
 class CiffIFD final {
 public:
   CiffIFD(FileMap* f, uint32 start, uint32 end, uint32 depth=0);
-  virtual ~CiffIFD();
+  ~CiffIFD();
   std::vector<CiffIFD*> mSubIFD;
   std::map<CiffTag, CiffEntry*> mEntry;
   std::vector<CiffIFD*> getIFDsWithTag(CiffTag tag);
   CiffEntry* getEntry(CiffTag tag);
-  bool hasEntry(CiffTag tag);
-  bool hasEntryRecursive(CiffTag tag);
+  bool __attribute__((pure)) hasEntry(CiffTag tag);
+  bool __attribute__((pure)) hasEntryRecursive(CiffTag tag);
   CiffEntry* getEntryRecursive(CiffTag tag);
   CiffEntry* getEntryRecursiveWhere(CiffTag tag, uint32 isValue);
   CiffEntry *getEntryRecursiveWhere(CiffTag tag, const std::string &isValue);

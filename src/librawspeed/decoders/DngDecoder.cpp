@@ -18,6 +18,8 @@
     Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
 */
 
+#include "rawspeedconfig.h"
+
 #include "decoders/DngDecoder.h"
 #include "common/Common.h"                // for uint32, uchar8, writeLog
 #include "common/DngOpcodes.h"            // for DngOpcodes
@@ -120,11 +122,11 @@ void DngDecoder::parseCFA(const TiffIFD* raw) {
   // Check if layout is OK, if present
   if (raw->hasEntry(CFALAYOUT))
     if (raw->getEntry(CFALAYOUT)->getU16() != 1)
-      ThrowRDE("DNG Decoder: Unsupported CFA Layout.");
+      ThrowRDE("Unsupported CFA Layout.");
 
   TiffEntry* cfadim = raw->getEntry(CFAREPEATPATTERNDIM);
   if (cfadim->count != 2)
-    ThrowRDE("DNG Decoder: Couldn't read CFA pattern dimension");
+    ThrowRDE("Couldn't read CFA pattern dimension");
 
   // Does NOT contain dimensions as some documents state
   TiffEntry* cPat = raw->getEntry(CFAPATTERN);
@@ -145,7 +147,7 @@ void DngDecoder::parseCFA(const TiffIFD* raw) {
 
   iPoint2D cfaSize(cfadim->getU32(1), cfadim->getU32(0));
   if (cfaSize.area() != cPat->count) {
-    ThrowRDE("DNG Decoder: CFA pattern dimension and pattern count does not "
+    ThrowRDE("CFA pattern dimension and pattern count does not "
              "match: %d.",
              cPat->count);
   }
@@ -165,7 +167,7 @@ void DngDecoder::parseCFA(const TiffIFD* raw) {
       try {
         c2 = int2enum.at(c1);
       } catch (std::out_of_range&) {
-        ThrowRDE("DNG Decoder: Unsupported CFA Color: %u", c1);
+        ThrowRDE("Unsupported CFA Color: %u", c1);
       }
 
       mRaw->cfa.setColorAt(iPoint2D(x, y), c2);
@@ -173,15 +175,15 @@ void DngDecoder::parseCFA(const TiffIFD* raw) {
   }
 }
 
-void DngDecoder::decodeData(const TiffIFD* raw, int compression) {
+void DngDecoder::decodeData(const TiffIFD* raw, int compression, uint32 sample_format) {
   mRaw->createData();
 
   if (compression == 8 && sample_format != 3) {
-    ThrowRDE("DNG Decoder: Only float format is supported for "
+    ThrowRDE("Only float format is supported for "
              "deflate-compressed data.");
   } else if ((compression == 7 || compression == 0x884c) &&
              sample_format != 1) {
-    ThrowRDE("DNG Decoder: Only 16 bit unsigned data supported for "
+    ThrowRDE("Only 16 bit unsigned data supported for "
              "JPEG-compressed data.");
   }
 
@@ -195,7 +197,7 @@ void DngDecoder::decodeData(const TiffIFD* raw, int compression) {
     uint32 tilew = raw->getEntry(TILEWIDTH)->getU32();
     uint32 tileh = raw->getEntry(TILELENGTH)->getU32();
     if (!tilew || !tileh)
-      ThrowRDE("DNG Decoder: Invalid tile size");
+      ThrowRDE("Invalid tile size");
 
     uint32 tilesX = (mRaw->dim.x + tilew - 1) / tilew;
     uint32 tilesY = (mRaw->dim.y + tileh - 1) / tileh;
@@ -204,7 +206,7 @@ void DngDecoder::decodeData(const TiffIFD* raw, int compression) {
     TiffEntry* offsets = raw->getEntry(TILEOFFSETS);
     TiffEntry* counts = raw->getEntry(TILEBYTECOUNTS);
     if (offsets->count != counts->count || offsets->count != nTiles) {
-      ThrowRDE("DNG Decoder: Tile count mismatch: offsets:%u count:%u, "
+      ThrowRDE("Tile count mismatch: offsets:%u count:%u, "
                "calculated:%u",
                offsets->count, counts->count, nTiles);
     }
@@ -225,7 +227,7 @@ void DngDecoder::decodeData(const TiffIFD* raw, int compression) {
     TiffEntry* counts = raw->getEntry(STRIPBYTECOUNTS);
 
     if (counts->count != offsets->count) {
-      ThrowRDE("DNG Decoder: Byte count number does not match strip size: "
+      ThrowRDE("Byte count number does not match strip size: "
                "count:%u, stips:%u ",
                counts->count, offsets->count);
     }
@@ -234,7 +236,7 @@ void DngDecoder::decodeData(const TiffIFD* raw, int compression) {
           raw->getEntry(ROWSPERSTRIP)->getU32() : mRaw->dim.y;
 
     if (yPerSlice == 0 || yPerSlice > (uint32)mRaw->dim.y)
-      ThrowRDE("DNG Decoder: Invalid y per slice");
+      ThrowRDE("Invalid y per slice");
 
     uint32 offY = 0;
     for (uint32 s = 0; s < counts->count; s++) {
@@ -250,14 +252,13 @@ void DngDecoder::decodeData(const TiffIFD* raw, int compression) {
   }
   uint32 nSlices = slices.size();
   if (!nSlices)
-    ThrowRDE("DNG Decoder: No valid slices found.");
+    ThrowRDE("No valid slices found.");
 
   slices.startDecoding();
 
   if (mRaw->errors.size() >= nSlices) {
-    ThrowRDE(
-        "DNG Decoding: Too many errors encountered. Giving up.\nFirst Error:%s",
-        mRaw->errors[0]);
+    ThrowRDE("Too many errors encountered. Giving up.\nFirst Error:%s",
+             mRaw->errors[0].c_str());
   }
 }
 
@@ -265,20 +266,21 @@ RawImage DngDecoder::decodeRawInternal() {
   vector<const TiffIFD*> data = mRootIFD->getIFDsWithTag(COMPRESSION);
 
   if (data.empty())
-    ThrowRDE("DNG Decoder: No image data found");
+    ThrowRDE("No image data found");
 
   dropUnsuportedChunks(data);
 
   if (data.empty())
-    ThrowRDE("DNG Decoder: No RAW chunks found");
+    ThrowRDE("No RAW chunks found");
 
   if (data.size() > 1) {
     writeLog(DEBUG_PRIO_EXTRA, "Multiple RAW chunks found - using first only!");
   }
 
   const TiffIFD* raw = data[0];
-  bps = raw->getEntry(BITSPERSAMPLE)->getU32();
+  uint32 bps = raw->getEntry(BITSPERSAMPLE)->getU32();
 
+  uint32 sample_format = 1;
   if (raw->hasEntry(SAMPLEFORMAT))
     sample_format = raw->getEntry(SAMPLEFORMAT)->getU32();
 
@@ -289,7 +291,7 @@ RawImage DngDecoder::decodeRawInternal() {
   else if (sample_format == 3)
     mRaw = RawImage::create(TYPE_FLOAT32);
   else
-    ThrowRDE("DNG Decoder: Only 16 bit unsigned or float point data supported.");
+    ThrowRDE("Only 16 bit unsigned or float point data supported.");
 
   mRaw->isCFA = (raw->getEntry(PHOTOMETRICINTERPRETATION)->getU16() == 32803);
 
@@ -300,16 +302,16 @@ RawImage DngDecoder::decodeRawInternal() {
   }
 
   if (sample_format == 1 && bps > 16)
-    ThrowRDE("DNG Decoder: Integer precision larger than 16 bits currently not supported.");
+    ThrowRDE("Integer precision larger than 16 bits currently not supported.");
 
   if (sample_format == 3 && bps != 32 && compression != 8)
-    ThrowRDE("DNG Decoder: Uncompressed float point must be 32 bits per sample.");
+    ThrowRDE("Uncompressed float point must be 32 bits per sample.");
 
   try {
     mRaw->dim.x = raw->getEntry(IMAGEWIDTH)->getU32();
     mRaw->dim.y = raw->getEntry(IMAGELENGTH)->getU32();
   } catch (TiffParserException &) {
-    ThrowRDE("DNG Decoder: Could not read basic image information.");
+    ThrowRDE("Could not read basic image information.");
   }
 
   try {
@@ -320,19 +322,18 @@ RawImage DngDecoder::decodeRawInternal() {
     uint32 cpp = raw->getEntry(SAMPLESPERPIXEL)->getU32();
 
     if (cpp > 4)
-      ThrowRDE("DNG Decoder: More than 4 samples per pixel is not supported.");
+      ThrowRDE("More than 4 samples per pixel is not supported.");
 
     mRaw->setCpp(cpp);
 
     // Now load the image
     try {
-      decodeData(raw, compression);
+      decodeData(raw, compression, sample_format);
     } catch (TiffParserException& e) {
-      ThrowRDE("DNG Decoder: Unsupported format, tried strips and tiles:\n%s",
-               e.what());
+      ThrowRDE("Unsupported format, tried strips and tiles:\n%s", e.what());
     }
   } catch (TiffParserException &e) {
-    ThrowRDE("DNG Decoder: Image could not be read:\n%s", e.what());
+    ThrowRDE("Image could not be read:\n%s", e.what());
   }
 
   // Fetch the white balance
@@ -361,7 +362,7 @@ RawImage DngDecoder::decodeRawInternal() {
 
     TiffEntry *active_area = raw->getEntry(ACTIVEAREA);
     if (active_area->count != 4)
-      ThrowRDE("DNG: active area has %d values instead of 4", active_area->count);
+      ThrowRDE("active area has %d values instead of 4", active_area->count);
 
     auto corners = active_area->getU32Array(4);
     if (iPoint2D(corners[1], corners[0]).isThisInside(mRaw->dim)) {
@@ -390,7 +391,7 @@ RawImage DngDecoder::decodeRawInternal() {
       cropped.dim = size;
 
     if (!cropped.hasPositiveArea())
-      ThrowRDE("DNG Decoder: No positive crop area");
+      ThrowRDE("No positive crop area");
 
     mRaw->subFrame(cropped);
     if (mRaw->isCFA && cropped.pos.x %2 == 1)
@@ -399,7 +400,7 @@ RawImage DngDecoder::decodeRawInternal() {
       mRaw->cfa.shiftDown();
   }
   if (mRaw->dim.area() <= 0)
-    ThrowRDE("DNG Decoder: No image left after crop");
+    ThrowRDE("No image left after crop");
 
   // Apply stage 1 opcodes
   if (applyStage1DngOpcodes) {
@@ -439,7 +440,7 @@ RawImage DngDecoder::decodeRawInternal() {
   }
 
  // Default white level is (2 ** BitsPerSample) - 1
-  mRaw->whitePoint = (1 >> raw->getEntry(BITSPERSAMPLE)->getU16()) - 1;
+  mRaw->whitePoint = (1UL << raw->getEntry(BITSPERSAMPLE)->getU16()) - 1UL;
 
   if (raw->hasEntry(WHITELEVEL)) {
     TiffEntry *whitelevel = raw->getEntry(WHITELEVEL);
@@ -473,7 +474,7 @@ RawImage DngDecoder::decodeRawInternal() {
   return mRaw;
 }
 
-void DngDecoder::decodeMetaDataInternal(CameraMetaData *meta) {
+void DngDecoder::decodeMetaDataInternal(const CameraMetaData* meta) {
   if (mRootIFD->hasEntryRecursive(ISOSPEEDRATINGS))
     mRaw->metadata.isoSpeed = mRootIFD->getEntryRecursive(ISOSPEEDRATINGS)->getU32();
 
@@ -490,7 +491,7 @@ void DngDecoder::decodeMetaDataInternal(CameraMetaData *meta) {
   mRaw->metadata.make = id.make;
   mRaw->metadata.model = id.model;
 
-  Camera *cam = meta->getCamera(id.make, id.model, "dng");
+  const Camera* cam = meta->getCamera(id.make, id.model, "dng");
   if (!cam) //Also look for non-DNG cameras in case it's a converted file
     cam = meta->getCamera(id.make, id.model, "");
   if (!cam) // Worst case scenario, look for any such camera.
@@ -512,7 +513,7 @@ void DngDecoder::decodeMetaDataInternal(CameraMetaData *meta) {
 }
 
 /* DNG Images are assumed to be decodable unless explicitly set so */
-void DngDecoder::checkSupportInternal(CameraMetaData *meta) {
+void DngDecoder::checkSupportInternal(const CameraMetaData* meta) {
   // We set this, since DNG's are not explicitly added.
   failOnUnknown = false;
 
@@ -583,7 +584,7 @@ bool DngDecoder::decodeBlackLevels(const TiffIFD* raw) {
 
   TiffEntry* black_entry = raw->getEntry(BLACKLEVEL);
   if ((int)black_entry->count < blackdim.x*blackdim.y)
-    ThrowRDE("DNG: BLACKLEVEL entry is too small");
+    ThrowRDE("BLACKLEVEL entry is too small");
 
   if (blackdim.x < 2 || blackdim.y < 2) {
     // We so not have enough to fill all individually, read a single and copy it
@@ -603,7 +604,7 @@ bool DngDecoder::decodeBlackLevels(const TiffIFD* raw) {
   if (raw->hasEntry(BLACKLEVELDELTAV)) {
     TiffEntry *blackleveldeltav = raw->getEntry(BLACKLEVELDELTAV);
     if ((int)blackleveldeltav->count < mRaw->dim.y)
-      ThrowRDE("DNG: BLACKLEVELDELTAV array is too small");
+      ThrowRDE("BLACKLEVELDELTAV array is too small");
     float black_sum[2] = {0.0f, 0.0f};
     for (int i = 0; i < mRaw->dim.y; i++)
       black_sum[i&1] += blackleveldeltav->getFloat(i);
@@ -615,7 +616,7 @@ bool DngDecoder::decodeBlackLevels(const TiffIFD* raw) {
   if (raw->hasEntry(BLACKLEVELDELTAH)){
     TiffEntry *blackleveldeltah = raw->getEntry(BLACKLEVELDELTAH);
     if ((int)blackleveldeltah->count < mRaw->dim.x)
-      ThrowRDE("DNG: BLACKLEVELDELTAH array is too small");
+      ThrowRDE("BLACKLEVELDELTAH array is too small");
     float black_sum[2] = {0.0f, 0.0f};
     for (int i = 0; i < mRaw->dim.x; i++)
       black_sum[i&1] += blackleveldeltah->getFloat(i);

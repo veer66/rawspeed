@@ -24,20 +24,23 @@
 #include "common/Point.h"                           // for iPoint2D
 #include "decoders/RawDecoder.h"                    // for RawDecoderThread
 #include "decoders/RawDecoderException.h"           // for ThrowRDE
+#include "decompressors/HuffmanTable.h"             // for HuffmanTable::signExtend
 #include "decompressors/UncompressedDecompressor.h" // for UncompressedDeco...
 #include "io/BitPumpMSB.h"                          // for BitPumpMSB
 #include "io/BitPumpPlain.h"                        // for BitPumpPlain
 #include "io/ByteStream.h"                          // for ByteStream
+#include "io/Endianness.h"                          // for getU32BE, getU32LE
 #include "io/IOException.h"                         // for IOException
+#include "metadata/Camera.h"                        // for Hints
 #include "metadata/ColorFilterArray.h"              // for CFAColor::CFA_GREEN
 #include "tiff/TiffEntry.h"                         // for TiffEntry
 #include "tiff/TiffIFD.h"                           // for TiffRootIFD, Tif...
 #include "tiff/TiffTag.h"                           // for TiffTag::DNGPRIV...
 #include <cassert>                                  // for assert
+#include <cstring>                                  // for memcpy
 #include <exception>                                // for exception
-#include <map>                                      // for map, _Rb_tree_it...
 #include <memory>                                   // for unique_ptr
-#include <string>                                   // for string, operator==
+#include <string>                                   // for operator==, basi...
 #include <vector>                                   // for vector
 
 using namespace std;
@@ -74,7 +77,7 @@ RawImage ArwDecoder::decodeRawInternal() {
       return mRaw;
     }
 
-    if (hints.find("srf_format") != hints.end()) {
+    if (hints.has("srf_format")) {
       raw = mRootIFD->getIFDWithTag(IMAGEWIDTH);
 
       uint32 width = raw->getEntry(IMAGEWIDTH)->getU32();
@@ -110,7 +113,7 @@ RawImage ArwDecoder::decodeRawInternal() {
       return mRaw;
     }
 
-    ThrowRDE("ARW Decoder: No image data found");
+    ThrowRDE("No image data found");
   }
 
   raw = data[0];
@@ -126,16 +129,18 @@ RawImage ArwDecoder::decodeRawInternal() {
   }
 
   if (32767 != compression)
-    ThrowRDE("ARW Decoder: Unsupported compression");
+    ThrowRDE("Unsupported compression");
 
   TiffEntry *offsets = raw->getEntry(STRIPOFFSETS);
   TiffEntry *counts = raw->getEntry(STRIPBYTECOUNTS);
 
   if (offsets->count != 1) {
-    ThrowRDE("ARW Decoder: Multiple Strips found: %u", offsets->count);
+    ThrowRDE("Multiple Strips found: %u", offsets->count);
   }
   if (counts->count != offsets->count) {
-    ThrowRDE("ARW Decoder: Byte count number does not match strip size: count:%u, strips:%u ", counts->count, offsets->count);
+    ThrowRDE(
+        "Byte count number does not match strip size: count:%u, strips:%u ",
+        counts->count, offsets->count);
   }
   uint32 width = raw->getEntry(IMAGEWIDTH)->getU32();
   uint32 height = raw->getEntry(IMAGELENGTH)->getU32();
@@ -183,7 +188,7 @@ RawImage ArwDecoder::decodeRawInternal() {
   uint32 off = offsets->getU32();
 
   if (!mFile->isValid(off))
-    ThrowRDE("Sony ARW decoder: Data offset after EOF, file probably truncated");
+    ThrowRDE("Data offset after EOF, file probably truncated");
 
   if (!mFile->isValid(off, c2))
     c2 = mFile->getSize() - off;
@@ -223,19 +228,22 @@ void ArwDecoder::DecodeUncompressed(const TiffIFD* raw) {
 
   UncompressedDecompressor u(*mFile, off, c2, mRaw, uncorrectedRawValues);
 
-  if (hints.find("sr2_format") != hints.end())
+  if (hints.has("sr2_format"))
     u.decode14BitRawBEunpacked(width, height);
   else
     u.decode16BitRawUnpacked(width, height);
 }
 
 void ArwDecoder::DecodeARW(ByteStream &input, uint32 w, uint32 h) {
+  if (0 == w)
+    return;
+
   BitPumpMSB bits(input);
   uchar8* data = mRaw->getData();
   auto *dest = (ushort16 *)&data[0];
   uint32 pitch = mRaw->pitch / sizeof(ushort16);
   int sum = 0;
-  for (uint32 x = w; x--;) {
+  for (int64 x = w - 1; x >= 0; x--) {
     for (uint32 y = 0; y < h + 1; y += 2) {
       bits.checkPos();
       bits.fill();
@@ -245,8 +253,7 @@ void ArwDecoder::DecodeARW(ByteStream &input, uint32 w, uint32 h) {
       if (len == 4)
         while (len < 17 && !bits.getBitsNoFill(1)) len++;
       int diff = bits.getBits(len);
-      if (len && (diff & (1 << (len - 1))) == 0)
-        diff -= (1 << len) - 1;
+      diff = len ? HuffmanTable::signExtended(diff, len) : diff;
       sum += diff;
       assert(!(sum >> 12));
       if (y < h) dest[x+y*pitch] = sum;
@@ -264,7 +271,7 @@ void ArwDecoder::DecodeARW2(ByteStream &input, uint32 w, uint32 h, uint32 bpp) {
 
   if (bpp == 12) {
     if (input.getRemainSize() < (w * 3 / 2))
-      ThrowRDE("Sony Decoder: Image data section too small, file probably truncated");
+      ThrowRDE("Image data section too small, file probably truncated");
 
     if (input.getRemainSize() < (w*h*3 / 2))
       h = input.getRemainSize() / (w * 3 / 2) - 1;
@@ -290,7 +297,7 @@ void ArwDecoder::DecodeARW2(ByteStream &input, uint32 w, uint32 h, uint32 bpp) {
   ThrowRDE("Unsupported bit depth");
 }
 
-void ArwDecoder::decodeMetaDataInternal(CameraMetaData *meta) {
+void ArwDecoder::decodeMetaDataInternal(const CameraMetaData* meta) {
   //Default
   int iso = 0;
 
@@ -341,11 +348,14 @@ void ArwDecoder::decodeMetaDataInternal(CameraMetaData *meta) {
 }
 
 void ArwDecoder::SonyDecrypt(uint32 *buffer, uint32 len, uint32 key) {
+  if (0 == len)
+    return;
+
   uint32 pad[128];
 
   // Initialize the decryption pad from the key
   for (int p=0; p < 4; p++)
-    pad[p] = key = key * 48828125 + 1;
+    pad[p] = key = key * 48828125UL + 1UL;
   pad[3] = pad[3] << 1 | (pad[0]^pad[2]) >> 31;
   for (int p=4; p < 127; p++)
     pad[p] = (pad[p-4]^pad[p-2]) << 1 | (pad[p-3]^pad[p-1]) >> 31;
@@ -354,9 +364,20 @@ void ArwDecoder::SonyDecrypt(uint32 *buffer, uint32 len, uint32 key) {
 
   int p = 127;
   // Decrypt the buffer in place using the pad
-  while (len--) {
+  for (; len > 0; len--) {
     pad[p & 127] = pad[(p+1) & 127] ^ pad[(p+1+64) & 127];
-    *buffer++ ^= pad[p & 127];
+
+    uint32 pv;
+    memcpy(&pv, pad + (p & 127), sizeof(uint32));
+
+    uint32 bv;
+    memcpy(&bv, buffer, sizeof(uint32));
+
+    bv ^= pv;
+
+    memcpy(buffer, &bv, sizeof(uint32));
+
+    buffer++;
     p++;
   }
 }
@@ -371,7 +392,7 @@ void ArwDecoder::GetWB() {
     TiffEntry *sony_length = makerNoteIFD.getEntryRecursive(SONY_LENGTH);
     TiffEntry *sony_key = makerNoteIFD.getEntryRecursive(SONY_KEY);
     if(!sony_offset || !sony_length || !sony_key || sony_key->count != 4)
-      ThrowRDE("ARW: couldn't find the correct metadata for WB decoding");
+      ThrowRDE("couldn't find the correct metadata for WB decoding");
 
     uint32 off = sony_offset->getU32();
     uint32 len = sony_length->getU32();
@@ -386,14 +407,14 @@ void ArwDecoder::GetWB() {
     if (encryptedIFD.hasEntry(SONYGRBGLEVELS)){
       TiffEntry *wb = encryptedIFD.getEntry(SONYGRBGLEVELS);
       if (wb->count != 4)
-        ThrowRDE("ARW: WB has %d entries instead of 4", wb->count);
+        ThrowRDE("WB has %d entries instead of 4", wb->count);
       mRaw->metadata.wbCoeffs[0] = wb->getFloat(1);
       mRaw->metadata.wbCoeffs[1] = wb->getFloat(0);
       mRaw->metadata.wbCoeffs[2] = wb->getFloat(2);
     } else if (encryptedIFD.hasEntry(SONYRGGBLEVELS)){
       TiffEntry *wb = encryptedIFD.getEntry(SONYRGGBLEVELS);
       if (wb->count != 4)
-        ThrowRDE("ARW: WB has %d entries instead of 4", wb->count);
+        ThrowRDE("WB has %d entries instead of 4", wb->count);
       mRaw->metadata.wbCoeffs[0] = wb->getFloat(0);
       mRaw->metadata.wbCoeffs[1] = wb->getFloat(1);
       mRaw->metadata.wbCoeffs[2] = wb->getFloat(3);

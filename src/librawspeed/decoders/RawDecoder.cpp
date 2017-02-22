@@ -19,15 +19,17 @@
     Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
 */
 
+#include "rawspeedconfig.h"
+
 #include "decoders/RawDecoder.h"
-#include "common/Common.h"                          // for uint32, writeLog
+#include "common/Common.h"                          // for uint32, getThrea...
 #include "common/Point.h"                           // for iPoint2D, iRecta...
 #include "decoders/RawDecoderException.h"           // for ThrowRDE, RawDec...
 #include "decompressors/UncompressedDecompressor.h" // for UncompressedDeco...
 #include "io/FileIOException.h"                     // for FileIOException
 #include "io/IOException.h"                         // for IOException
 #include "metadata/BlackArea.h"                     // for BlackArea
-#include "metadata/Camera.h"                        // for Camera
+#include "metadata/Camera.h"                        // for Camera, Hints
 #include "metadata/CameraMetaData.h"                // for CameraMetaData
 #include "metadata/CameraSensorInfo.h"              // for CameraSensorInfo
 #include "metadata/ColorFilterArray.h"              // for ColorFilterArray
@@ -36,12 +38,8 @@
 #include "tiff/TiffIFD.h"                           // for TiffIFD
 #include "tiff/TiffTag.h"                           // for TiffTag::STRIPOF...
 #include <algorithm>                                // for min
-#include <cstdlib>                                  // for atoi
-#include <map>                                      // for map, _Rb_tree_it...
 #include <memory>                                   // for allocator_traits...
-#include <sstream>                                  // for stringstream
-#include <string>                                   // for string, allocator
-#include <utility>                                  // for pair
+#include <string>                                   // for string, basic_st...
 #include <vector>                                   // for vector
 
 using namespace std;
@@ -85,7 +83,7 @@ void RawDecoder::decodeUncompressed(const TiffIFD *rawIFD, BitOrder order) {
   }
 
   if (slices.empty())
-    ThrowRDE("RAW Decoder: No valid slices found. File probably truncated.");
+    ThrowRDE("No valid slices found. File probably truncated.");
 
   mRaw->dim = iPoint2D(width, offY);
   mRaw->createData();
@@ -111,14 +109,16 @@ void RawDecoder::decodeUncompressed(const TiffIFD *rawIFD, BitOrder order) {
       if (i>0)
         mRaw->setError(e.what());
       else
-        ThrowRDE("RAW decoder: IO error occurred in first slice, unable to decode more. Error is: %s", e.what());
+        ThrowRDE("IO error occurred in first slice, unable to decode more. "
+                 "Error is: %s",
+                 e.what());
     }
     offY += slice.h;
   }
 }
 
-void RawDecoder::askForSamples(CameraMetaData* meta, const string& make,
-                               const string& model, const string& mode) {
+void RawDecoder::askForSamples(const CameraMetaData* meta, const string& make,
+                               const string& model, const string& mode) const {
   if ("dng" == mode)
     return;
 
@@ -128,11 +128,12 @@ void RawDecoder::askForSamples(CameraMetaData* meta, const string& make,
            make.c_str(), model.c_str(), mode.c_str());
 }
 
-bool RawDecoder::checkCameraSupported(CameraMetaData* meta, const string& make,
-                                      const string& model, const string& mode) {
+bool RawDecoder::checkCameraSupported(const CameraMetaData* meta,
+                                      const string& make, const string& model,
+                                      const string& mode) {
   mRaw->metadata.make = make;
   mRaw->metadata.model = model;
-  Camera* cam = meta->getCamera(make, model, mode);
+  const Camera* cam = meta->getCamera(make, model, mode);
   if (!cam) {
     askForSamples(meta, make, model, mode);
 
@@ -153,11 +154,11 @@ bool RawDecoder::checkCameraSupported(CameraMetaData* meta, const string& make,
   return true;
 }
 
-void RawDecoder::setMetaData(CameraMetaData* meta, const string& make,
+void RawDecoder::setMetaData(const CameraMetaData* meta, const string& make,
                              const string& model, const string& mode,
                              int iso_speed) {
   mRaw->metadata.isoSpeed = iso_speed;
-  Camera *cam = meta->getCamera(make, model, mode);
+  const Camera* cam = meta->getCamera(make, model, mode);
   if (!cam) {
     askForSamples(meta, make, model, mode);
 
@@ -216,14 +217,14 @@ void RawDecoder::setMetaData(CameraMetaData* meta, const string& make,
   // (the same order as the in the CFA tag)
   // A hint could be:
   // <Hint name="override_cfa_black" value="10,20,30,20"/>
-  if (cam->hints.find(string("override_cfa_black")) != cam->hints.end()) {
-    string rgb = cam->hints.find(string("override_cfa_black"))->second;
-    vector<string> v = splitString(rgb, ',');
+  string cfa_black = hints.get("override_cfa_black", string());
+  if (!cfa_black.empty()) {
+    vector<string> v = splitString(cfa_black, ',');
     if (v.size() != 4) {
       mRaw->setError("Expected 4 values '10,20,30,20' as values for override_cfa_black hint.");
     } else {
       for (int i = 0; i < 4; i++) {
-        mRaw->blackLevelSeparate[i] = atoi(v[i].c_str());
+        mRaw->blackLevelSeparate[i] = stoi(v[i]);
       }
     }
   }
@@ -243,7 +244,7 @@ void *RawDecoderDecodeThread(void *_this) {
 }
 
 void RawDecoder::startThreads() {
-#ifdef NO_PTHREAD
+#ifndef HAVE_PTHREAD
   uint32 threads = 1;
   RawDecoderThread t(this);
   t.start_y = 0;
@@ -280,26 +281,24 @@ void RawDecoder::startThreads() {
   pthread_attr_destroy(&attr);
 
   if (fail) {
-    ThrowRDE("RawDecoder::startThreads: Unable to start threads");
+    ThrowRDE("Unable to start threads");
   }
 #endif
 
   if (mRaw->errors.size() >= threads)
-    ThrowRDE("RawDecoder::startThreads: All threads reported errors. Cannot load image.");
+    ThrowRDE("All threads reported errors. Cannot load image.");
 }
 
 void RawDecoder::decodeThreaded(RawDecoderThread * t) {
-  ThrowRDE("Internal Error: This class does not support threaded decoding");
+  ThrowRDE("This class does not support threaded decoding");
 }
 
 RawSpeed::RawImage RawDecoder::decodeRaw()
 {
   try {
     RawImage raw = decodeRawInternal();
-    if(hints.find("pixel_aspect_ratio") != hints.end()) {
-      stringstream convert(hints.find("pixel_aspect_ratio")->second);
-      convert >> raw->metadata.pixelAspectRatio;
-    }
+    raw->metadata.pixelAspectRatio =
+        hints.get("pixel_aspect_ratio", raw->metadata.pixelAspectRatio);
     if (interpolateBadPixels)
       raw->fixBadPixels();
     return raw;
@@ -313,8 +312,7 @@ RawSpeed::RawImage RawDecoder::decodeRaw()
   return nullptr;
 }
 
-void RawDecoder::decodeMetaData(CameraMetaData *meta)
-{
+void RawDecoder::decodeMetaData(const CameraMetaData* meta) {
   try {
     return decodeMetaDataInternal(meta);
   } catch (TiffParserException &e) {
@@ -326,8 +324,7 @@ void RawDecoder::decodeMetaData(CameraMetaData *meta)
   }
 }
 
-void RawDecoder::checkSupport(CameraMetaData *meta)
-{
+void RawDecoder::checkSupport(const CameraMetaData* meta) {
   try {
     return checkSupportInternal(meta);
   } catch (TiffParserException &e) {
@@ -355,7 +352,7 @@ void RawDecoder::startTasks( uint32 tasks )
     return;
   }
 
-#ifndef NO_PTHREAD
+#ifdef HAVE_PTHREAD
   pthread_attr_t attr;
 
   /* Initialize and set thread detached attribute */
@@ -375,7 +372,7 @@ void RawDecoder::startTasks( uint32 tasks )
   }
 
   if (mRaw->errors.size() >= tasks)
-    ThrowRDE("RawDecoder::startThreads: All threads reported errors. Cannot load image.");
+    ThrowRDE("All threads reported errors. Cannot load image.");
 
 #else
   ThrowRDE("Unreachable");

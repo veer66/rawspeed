@@ -24,12 +24,10 @@
 #include "common/Point.h"                           // for iPoint2D
 #include "decoders/RawDecoderException.h"           // for ThrowRDE
 #include "decompressors/UncompressedDecompressor.h" // for UncompressedDeco...
-#include "metadata/Camera.h"                        // for Camera
-#include <cstdlib>                                  // for atoi
-#include <map>                                      // for map, _Rb_tree_co...
+#include "metadata/Camera.h"                        // for Camera, Hints
+#include <map>                                      // for map
 #include <stdexcept>                                // for out_of_range
 #include <string>                                   // for string, basic_st...
-#include <utility>                                  // for pair
 
 using namespace std;
 
@@ -37,12 +35,8 @@ namespace RawSpeed {
 
 class CameraMetaData;
 
-NakedDecoder::NakedDecoder(FileMap* file, Camera* c) :
-    RawDecoder(file) {
-  cam = c;
-}
-
-NakedDecoder::~NakedDecoder() = default;
+NakedDecoder::NakedDecoder(FileMap* file, const Camera* c)
+    : RawDecoder(file), cam(c) {}
 
 static const map<string, BitOrder> order2enum = {
     {"plain", BitOrder_Plain},
@@ -56,37 +50,25 @@ void NakedDecoder::parseHints() {
   const auto& make = cam->make.c_str();
   const auto& model = cam->model.c_str();
 
-  auto parseHint = [&cHints, &make, &model](const string& name, uint32& field,
-                                            bool fatal = true) {
-    const auto& hint = cHints.find(name);
-    if (hint == cHints.end()) {
-      if (fatal)
-        ThrowRDE("Naked: %s %s: couldn't find %s", make, model, name.c_str());
-      else
-        return false;
-    }
+  auto parseHint = [&cHints, &make, &model](const string& name) -> uint32 {
+    if (!cHints.has(name))
+      ThrowRDE("%s %s: couldn't find %s", make, model, name.c_str());
 
-    const auto& tmp = hint->second;
-    field = (uint32)atoi(tmp.c_str());
-
-    return true;
+    return cHints.get(name, 0u);
   };
 
-  parseHint("full_width", width);
-  parseHint("full_height", height);
-  parseHint("filesize", filesize);
-  parseHint("offset", offset, false);
+  width = parseHint("full_width");
+  height = parseHint("full_height");
+  filesize = parseHint("filesize");
+  offset = cHints.get("offset", 0);
+  bits = cHints.get("bits", (filesize-offset)*8/width/height);
 
-  if (!parseHint("bits", bits, false))
-    bits = (filesize-offset)*8/width/height;
-
-  if (cHints.find("order") != cHints.end()) {
-    const auto& tmp = cHints.find("order")->second;
-
+  auto order = cHints.get("order", string());
+  if (!order.empty()) {
     try {
-      bo = order2enum.at(tmp);
+      bo = order2enum.at(order);
     } catch (std::out_of_range&) {
-      ThrowRDE("Naked: %s %s: unknown order: %s", make, model, tmp.c_str());
+      ThrowRDE("%s %s: unknown order: %s", make, model, order.c_str());
     }
   }
 }
@@ -105,11 +87,11 @@ RawImage NakedDecoder::decodeRawInternal() {
   return mRaw;
 }
 
-void NakedDecoder::checkSupportInternal(CameraMetaData *meta) {
+void NakedDecoder::checkSupportInternal(const CameraMetaData* meta) {
   this->checkCameraSupported(meta, cam->make, cam->model, cam->mode);
 }
 
-void NakedDecoder::decodeMetaDataInternal(CameraMetaData *meta) {
+void NakedDecoder::decodeMetaDataInternal(const CameraMetaData* meta) {
   setMetaData(meta, cam->make, cam->model, cam->mode, 0);
 }
 

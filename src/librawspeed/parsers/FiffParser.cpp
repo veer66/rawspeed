@@ -21,8 +21,9 @@
 */
 
 #include "parsers/FiffParser.h"
-#include "common/Common.h"               // for make_unique, uint32, get4BE
+#include "common/Common.h"               // for make_unique, uint32, uchar8
 #include "io/ByteStream.h"               // for ByteStream
+#include "io/Endianness.h"               // for getU32BE, getHostEndianness
 #include "parsers/FiffParserException.h" // for ThrowFPE
 #include "parsers/TiffParser.h"          // for parseTiff, makeDecoder
 #include "parsers/TiffParserException.h" // for TiffParserException
@@ -81,7 +82,7 @@ RawDecoder* FiffParser::getDecoder() {
       uint32 entries = bytes.getU32();
 
       if (entries > 255)
-        ThrowFPE("ParseFuji: Too many entries");
+        ThrowFPE("Too many entries");
 
       for (uint32 i = 0; i < entries; i++) {
         ushort16 tag = bytes.getU16();
@@ -104,7 +105,7 @@ RawDecoder* FiffParser::getDecoder() {
 
     return makeDecoder(move(rootIFD), *mInput);
   } catch (TiffParserException&) {
-    ThrowFPE("FiffParser: No decoder found. Sorry.");
+    ThrowFPE("No decoder found. Sorry.");
   }
 }
 

@@ -20,7 +20,8 @@
 */
 
 #include "tiff/CiffIFD.h"
-#include "common/Common.h"               // for uint32, getU16LE, getU32LE
+#include "common/Common.h"               // for uint32, ushort16
+#include "io/Endianness.h"               // for getU16LE, getU32LE
 #include "io/IOException.h"              // for IOException
 #include "parsers/CiffParserException.h" // for ThrowCPE, CiffParserException
 #include "tiff/CiffEntry.h"              // for CiffEntry, CiffDataType::CI...
@@ -35,7 +36,7 @@ namespace RawSpeed {
 
 #define CIFF_DEPTH(_depth)                                                     \
   if ((depth = (_depth) + 1) > 10)                                             \
-    ThrowCPE("CIFF: sub-micron matryoshka dolls are ignored");
+    ThrowCPE("sub-micron matryoshka dolls are ignored");
 
 CiffIFD::CiffIFD(FileMap* f, uint32 start, uint32 end, uint32 _depth) {
   CIFF_DEPTH(_depth);
@@ -89,7 +90,7 @@ CiffIFD::~CiffIFD() {
   mSubIFD.clear();
 }
 
-bool CiffIFD::hasEntryRecursive(CiffTag tag) {
+bool __attribute__((pure)) CiffIFD::hasEntryRecursive(CiffTag tag) {
   if (mEntry.find(tag) != mEntry.end())
     return true;
   for (auto &i : mSubIFD) {
@@ -190,12 +191,11 @@ CiffEntry* CiffIFD::getEntry(CiffTag tag) {
   if (mEntry.find(tag) != mEntry.end()) {
     return mEntry[tag];
   }
-  ThrowCPE("CiffIFD: CIFF Parser entry 0x%x not found.", tag);
+  ThrowCPE("Entry 0x%x not found.", tag);
   return nullptr;
 }
 
-
-bool CiffIFD::hasEntry(CiffTag tag) {
+bool __attribute__((pure)) CiffIFD::hasEntry(CiffTag tag) {
   return mEntry.find(tag) != mEntry.end();
 }
 

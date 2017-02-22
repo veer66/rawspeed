@@ -42,23 +42,24 @@ struct CameraId {
 
 class CameraMetaData final {
 public:
-  CameraMetaData();
+  CameraMetaData() = default;
   CameraMetaData(const char *docname);
-  virtual ~CameraMetaData();
+  ~CameraMetaData();
   std::map<CameraId, Camera*> cameras;
   std::map<uint32,Camera*> chdkCameras;
 
   // searches for camera with given make + model + mode
-  Camera* getCamera(const std::string& make, const std::string& model,
-                    const std::string& mode);
+  const Camera* getCamera(const std::string& make, const std::string& model,
+                          const std::string& mode) const;
 
   // searches for camera with given make + model, with ANY mode
-  Camera* getCamera(const std::string& make, const std::string& model);
+  const Camera* getCamera(const std::string& make,
+                          const std::string& model) const;
 
   bool hasCamera(const std::string& make, const std::string& model,
-                 const std::string& mode);
-  Camera* getChdkCamera(uint32 filesize);
-  bool hasChdkCamera(uint32 filesize);
+                 const std::string& mode) const;
+  const Camera* __attribute__((pure)) getChdkCamera(uint32 filesize) const;
+  bool __attribute__((pure)) hasChdkCamera(uint32 filesize) const;
   void disableMake(const std::string &make);
   void disableCamera(const std::string &make, const std::string &model);
 
