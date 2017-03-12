@@ -21,6 +21,9 @@
 
 #pragma once
 
+#include "common/Common.h" // for uint32
+#include "decompressors/AbstractDecompressor.h" // for AbstractDecompressor
+
 namespace RawSpeed {
 
 class ByteStream;
@@ -29,6 +32,12 @@ class RawImage;
 
 class TiffIFD;
 
-void decodePentax(RawImage& mRaw, ByteStream&& data, TiffIFD* root);
+class PentaxDecompressor final : public AbstractDecompressor {
+public:
+  static void decompress(RawImage& mRaw, ByteStream&& data, TiffIFD* root);
+
+private:
+  static const uchar8 pentax_tree[][2][16];
+};
 
 } // namespace RawSpeed

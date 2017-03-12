@@ -28,6 +28,7 @@
 #include <memory>           // for unique_ptr, allocator
 #include <string>           // for string
 #include <vector>           // for vector
+#include <cassert>          // for assert
 
 int rawspeed_get_number_of_processor_cores();
 
@@ -43,12 +44,15 @@ using int32 = signed int;
 using ushort16 = unsigned short;
 using short16 = signed short;
 
-const int DEBUG_PRIO_ERROR = 0x10;
-const int DEBUG_PRIO_WARNING = 0x100;
-const int DEBUG_PRIO_INFO = 0x1000;
-const int DEBUG_PRIO_EXTRA = 0x10000;
+enum DEBUG_PRIO {
+  DEBUG_PRIO_ERROR = 0x10,
+  DEBUG_PRIO_WARNING = 0x100,
+  DEBUG_PRIO_INFO = 0x1000,
+  DEBUG_PRIO_EXTRA = 0x10000
+};
 
-void writeLog(int priority, const char *format, ...) __attribute__((format(printf, 2, 3)));
+void writeLog(DEBUG_PRIO priority, const char* format, ...)
+    __attribute__((format(printf, 2, 3)));
 
 inline void copyPixels(uchar8* dest, int dstPitch, const uchar8* src,
                        int srcPitch, int rowSize, int height)
@@ -69,7 +73,8 @@ template <typename T> inline constexpr bool isPowerOfTwo(T val) {
   return (val & (~val+1)) == val;
 }
 
-constexpr inline size_t roundUp(size_t value, size_t multiple) {
+constexpr inline size_t __attribute__((const))
+roundUp(size_t value, size_t multiple) {
   return ((multiple == 0) || (value % multiple == 0))
              ? value
              : value + multiple - (value % multiple);
@@ -110,10 +115,11 @@ extern "C" { FILE __iob_func[3] = { *stdin,*stdout,*stderr }; }
 #endif
 #endif
 
-// clampBits clamps the given int to the range 0 .. 2^n-1
-inline uint32 clampBits(int64 x, uint32 n) {
-  const int64 tmp = (1ULL << n) - 1ULL;
-  x = x < 0LL ? 0LL : x;
+// clampBits clamps the given int to the range 0 .. 2^n-1, with n <= 16
+inline ushort16 __attribute__((const)) clampBits(int x, uint32 n) {
+  assert(n <= 16);
+  const int tmp = (1 << n) - 1;
+  x = x < 0 ? 0 : x;
   x = x > tmp ? tmp : x;
   return x;
 }

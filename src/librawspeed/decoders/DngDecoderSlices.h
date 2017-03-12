@@ -24,13 +24,17 @@
 
 #include "common/Common.h"    // for uint32
 #include "common/RawImage.h"  // for RawImage
-#include "common/Threading.h" // for pthread_t
-#include "io/FileMap.h"       // for FileMap
 #include <memory>             // for unique_ptr
 #include <queue>              // for queue
 #include <vector>             // for vector
 
+#ifdef HAVE_PTHREAD
+#include <pthread.h>
+#endif
+
 namespace RawSpeed {
+
+class Buffer;
 
 class DngDecoderSlices;
 
@@ -40,14 +44,13 @@ public:
   DngSliceElement(uint32 off, uint32 count, uint32 offsetX, uint32 offsetY,
                   uint32 w, uint32 h)
       : byteOffset(off), byteCount(count), offX(offsetX), offY(offsetY),
-        width(w), height(h), mUseBigtable(false) {}
+        width(w), height(h) {}
   const uint32 byteOffset;
   const uint32 byteCount;
   const uint32 offX;
   const uint32 offY;
   const uint32 width;
   const uint32 height;
-  bool mUseBigtable;
 };
 
 class DngDecoderThread
@@ -57,7 +60,7 @@ public:
   pthread_t threadid;
 #endif
   DngDecoderThread(DngDecoderSlices* parent_) : parent(parent_) {}
-  std::queue<DngSliceElement> slices;
+  std::queue<std::unique_ptr<DngSliceElement>> slices;
   DngDecoderSlices* parent;
 };
 
@@ -65,14 +68,14 @@ public:
 class DngDecoderSlices
 {
 public:
-  DngDecoderSlices(FileMap *file, const RawImage &img, int compression);
-  void addSlice(const DngSliceElement &slice);
+  DngDecoderSlices(Buffer* file, const RawImage& img, int compression);
+  void addSlice(std::unique_ptr<DngSliceElement>&& slice);
   void startDecoding();
   void decodeSlice(DngDecoderThread* t);
   int __attribute__((pure)) size();
-  std::queue<DngSliceElement> slices;
+  std::queue<std::unique_ptr<DngSliceElement>> slices;
   std::vector<std::unique_ptr<DngDecoderThread>> threads;
-  FileMap *mFile;
+  Buffer* mFile;
   RawImage mRaw;
   bool mFixLjpeg;
   uint32 mPredictor;

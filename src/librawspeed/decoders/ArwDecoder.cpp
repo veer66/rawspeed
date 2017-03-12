@@ -23,11 +23,12 @@
 #include "common/Common.h"                          // for uint32, uchar8
 #include "common/Point.h"                           // for iPoint2D
 #include "decoders/RawDecoder.h"                    // for RawDecoderThread
-#include "decoders/RawDecoderException.h"           // for ThrowRDE
-#include "decompressors/HuffmanTable.h"             // for HuffmanTable::signExtend
+#include "decoders/RawDecoderException.h"           // for RawDecoderExcept...
+#include "decompressors/HuffmanTable.h"             // for HuffmanTable
 #include "decompressors/UncompressedDecompressor.h" // for UncompressedDeco...
 #include "io/BitPumpMSB.h"                          // for BitPumpMSB
 #include "io/BitPumpPlain.h"                        // for BitPumpPlain
+#include "io/Buffer.h"                              // for Buffer
 #include "io/ByteStream.h"                          // for ByteStream
 #include "io/Endianness.h"                          // for getU32BE, getU32LE
 #include "io/IOException.h"                         // for IOException
@@ -37,7 +38,7 @@
 #include "tiff/TiffIFD.h"                           // for TiffRootIFD, Tif...
 #include "tiff/TiffTag.h"                           // for TiffTag::DNGPRIV...
 #include <cassert>                                  // for assert
-#include <cstring>                                  // for memcpy
+#include <cstring>                                  // for memcpy, size_t
 #include <exception>                                // for exception
 #include <memory>                                   // for unique_ptr
 #include <string>                                   // for operator==, basi...
@@ -94,20 +95,26 @@ RawImage ArwDecoder::decodeRawInternal() {
       uint32 offset = (*keyData) * 4;
       keyData = mFile->getData(key_off + offset, 4);
       uint32 key = getU32BE(keyData);
-      uchar8 *head = mFile->getDataWrt(head_off, 40);
-      SonyDecrypt((uint32 *) head, 10, key);
+      static const size_t head_size = 40;
+      const uchar8* head_orig = mFile->getData(head_off, head_size);
+      vector<uchar8> head(head_size);
+      SonyDecrypt((uint32*)head_orig, (uint32*)&head[0], 10, key);
       for (int i=26; i-- > 22; )
         key = key << 8 | head[i];
 
-      // "Decrypt" the whole image buffer in place
-      uchar8 *image_data = mFile->getDataWrt(off, len);
-      SonyDecrypt((uint32 *) image_data, len/4, key);
+      // "Decrypt" the whole image buffer
+      auto image_data = mFile->getData(off, len);
+      auto image_decoded = Buffer::Create(len);
+      SonyDecrypt((uint32*)image_data, (uint32*)image_decoded.get(), len / 4,
+                  key);
+
+      Buffer di(move(image_decoded), len);
 
       // And now decode as a normal 16bit raw
       mRaw->dim = iPoint2D(width, height);
       mRaw->createData();
 
-      UncompressedDecompressor u(*mFile, off, len, mRaw, uncorrectedRawValues);
+      UncompressedDecompressor u(di, 0, len, mRaw, uncorrectedRawValues);
       u.decode16BitRawBEunpacked(width, height);
 
       return mRaw;
@@ -245,7 +252,6 @@ void ArwDecoder::DecodeARW(ByteStream &input, uint32 w, uint32 h) {
   int sum = 0;
   for (int64 x = w - 1; x >= 0; x--) {
     for (uint32 y = 0; y < h + 1; y += 2) {
-      bits.checkPos();
       bits.fill();
       if (y == h) y = 1;
       uint32 len = 4 - bits.getBitsNoFill(2);
@@ -347,7 +353,8 @@ void ArwDecoder::decodeMetaDataInternal(const CameraMetaData* meta) {
   }
 }
 
-void ArwDecoder::SonyDecrypt(uint32 *buffer, uint32 len, uint32 key) {
+void ArwDecoder::SonyDecrypt(uint32* ibuf, uint32* obuf, uint32 len,
+                             uint32 key) {
   if (0 == len)
     return;
 
@@ -371,22 +378,30 @@ void ArwDecoder::SonyDecrypt(uint32 *buffer, uint32 len, uint32 key) {
     memcpy(&pv, pad + (p & 127), sizeof(uint32));
 
     uint32 bv;
-    memcpy(&bv, buffer, sizeof(uint32));
+    memcpy(&bv, ibuf, sizeof(uint32));
 
     bv ^= pv;
 
-    memcpy(buffer, &bv, sizeof(uint32));
+    memcpy(obuf, &bv, sizeof(uint32));
 
-    buffer++;
+    ibuf++;
+    obuf++;
     p++;
   }
+}
+
+void ArwDecoder::SonyDecrypt(uint32* buffer, uint32 len, uint32 key) {
+  if (0 == len)
+    return;
+
+  return SonyDecrypt(buffer, buffer, len, key);
 }
 
 void ArwDecoder::GetWB() {
   // Set the whitebalance for all the modern ARW formats (everything after A100)
   if (mRootIFD->hasEntryRecursive(DNGPRIVATEDATA)) {
     TiffEntry *priv = mRootIFD->getEntryRecursive(DNGPRIVATEDATA);
-    TiffRootIFD makerNoteIFD(priv->getRootIfdData(), priv->getU32());
+    TiffRootIFD makerNoteIFD(nullptr, priv->getRootIfdData(), priv->getU32());
 
     TiffEntry *sony_offset = makerNoteIFD.getEntryRecursive(SONY_OFFSET);
     TiffEntry *sony_length = makerNoteIFD.getEntryRecursive(SONY_LENGTH);
@@ -398,11 +413,18 @@ void ArwDecoder::GetWB() {
     uint32 len = sony_length->getU32();
     uint32 key = getU32LE(sony_key->getData(4));
 
-    //TODO: replace ugly inplace decryption of (const) raw data
-    auto *ifp_data = (uint32 *)mFile->getDataWrt(off, len);
-    SonyDecrypt(ifp_data, len/4, key);
+    // "Decrypt" IFD
+    const auto& ifd_crypt = priv->getRootIfdData();
+    auto ifd_size = ifd_crypt.getSize();
+    auto ifd_decoded = Buffer::Create(ifd_size);
+    memcpy(ifd_decoded.get(), ifd_crypt.begin(), ifd_size);
 
-    TiffRootIFD encryptedIFD(priv->getRootIfdData(), off);
+    SonyDecrypt((uint32*)(ifd_crypt.getData(off, len)),
+                (uint32*)(ifd_decoded.get() + off), len / 4, key);
+
+    Buffer decIFD(move(ifd_decoded), ifd_size);
+    DataBuffer dbIDD(decIFD, priv->getRootIfdData().isInNativeByteOrder());
+    TiffRootIFD encryptedIFD(nullptr, dbIDD, off);
 
     if (encryptedIFD.hasEntry(SONYGRBGLEVELS)){
       TiffEntry *wb = encryptedIFD.getEntry(SONYGRBGLEVELS);
@@ -438,7 +460,6 @@ void ArwDecoder::decodeThreaded(RawDecoderThread * t) {
 
     // Process 32 pixels (16x2) per loop.
     for (int32 x = 0; x < w - 30;) {
-      bits.checkPos();
       int _max = bits.getBits(11);
       int _min = bits.getBits(11);
       int _imax = bits.getBits(4);
@@ -447,12 +468,16 @@ void ArwDecoder::decodeThreaded(RawDecoderThread * t) {
       for (sh = 0; sh < 4 && 0x80 << sh <= _max - _min; sh++);
       for (int i = 0; i < 16; i++) {
         int p;
-        if (i == _imax) p = _max;
-        else if (i == _imin) p = _min;
+        if (i == _imax)
+          p = _max;
         else {
-          p = (bits.getBits(7) << sh) + _min;
-          if (p > 0x7ff)
-            p = 0x7ff;
+          if (i == _imin)
+            p = _min;
+          else {
+            p = (bits.getBits(7) << sh) + _min;
+            if (p > 0x7ff)
+              p = 0x7ff;
+          }
         }
         mRaw->setWithLookUp(p << 1, (uchar8*)&dest[x+i*2], &random);
       }

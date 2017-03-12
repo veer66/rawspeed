@@ -21,10 +21,12 @@
 
 #include "tiff/CiffEntry.h"
 #include "common/Common.h"               // for uchar8, uint32, ushort16
+#include "io/Buffer.h"                   // for Buffer
 #include "io/Endianness.h"               // for getU32LE, getU16LE
 #include "parsers/CiffParserException.h" // for ThrowCPE
 #include <cstdio>                        // for sprintf
 #include <cstring>                       // for memcpy, strlen
+#include <limits>                        // for numeric_limits
 #include <string>                        // for string, allocator
 #include <vector>                        // for vector
 
@@ -32,7 +34,7 @@ using namespace std;
 
 namespace RawSpeed {
 
-CiffEntry::CiffEntry(FileMap* f, uint32 value_data, uint32 offset) {
+CiffEntry::CiffEntry(Buffer* f, uint32 value_data, uint32 offset) {
   own_data = nullptr;
   ushort16 p = getU16LE(f->getData(offset, 2));
   tag = (CiffTag) (p & 0x3fff);
@@ -40,23 +42,26 @@ CiffEntry::CiffEntry(FileMap* f, uint32 value_data, uint32 offset) {
   type = (CiffDataType) (p & 0x3800);
   if (datalocation == 0x0000) { // Data is offset in value_data
     bytesize = getU32LE(f->getData(offset + 2, 4));
-    data_offset = getU32LE(f->getData(offset + 6, 4)) + value_data;
-    data = f->getDataWrt(data_offset, bytesize);
+
+    data_offset = getU32LE(f->getData(offset + 6, 4));
+    if (data_offset >= numeric_limits<uint32>::max() - value_data)
+      ThrowCPE("Corrupt data offset.");
+
+    data_offset += value_data;
+
+    data = f->getData(data_offset, bytesize);
   } else if (datalocation == 0x4000) { // Data is stored directly in entry
     data_offset = offset + 2;
     bytesize = 8; // Maximum of 8 bytes of data (the size and offset fields)
-    data = f->getDataWrt(data_offset, bytesize);
+    data = f->getData(data_offset, bytesize);
   } else
-    ThrowCPE("Don't understand data location 0x%x\n", datalocation);
+    ThrowCPE("Don't understand data location 0x%x", datalocation);
 
   // Set the number of items using the shift
   count = bytesize >> getElementShift();
 }
 
-CiffEntry::~CiffEntry() {
-  if (own_data)
-    delete[] own_data;
-}
+CiffEntry::~CiffEntry() { delete[] own_data; }
 
 uint32 __attribute__((pure)) CiffEntry::getElementShift() {
   switch (type) {
@@ -95,10 +100,12 @@ bool __attribute__((pure)) CiffEntry::isInt() {
 }
 
 uint32 CiffEntry::getU32(uint32 num) {
-  if (!isInt())
+  if (!isInt()) {
     ThrowCPE(
         "Wrong type 0x%x encountered. Expected Long, Short or Byte at 0x%x",
         type, tag);
+  }
+
   if (type == CIFF_BYTE)
     return getByte(num);
   if (type == CIFF_SHORT)
@@ -174,15 +181,6 @@ void CiffEntry::setData( const void *in_data, uint32 byte_count )
     memcpy(own_data, data, bytesize);
   }
   memcpy(own_data, in_data, byte_count);
-}
-
-uchar8* CiffEntry::getDataWrt()
-{
-  if (!own_data) {
-    own_data = new uchar8[bytesize];
-    memcpy(own_data, data, bytesize);
-  }
-  return own_data;
 }
 
 #ifdef _MSC_VER

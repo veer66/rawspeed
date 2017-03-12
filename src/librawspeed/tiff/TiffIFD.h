@@ -25,7 +25,6 @@
 #include "io/Buffer.h"                   // for Buffer (ptr only), DataBuffer
 #include "io/ByteStream.h"               // for ByteStream
 #include "io/Endianness.h"               // for getHostEndianness, Endianne...
-#include "io/FileMap.h"                  // for FileMap
 #include "parsers/TiffParserException.h" // for ThrowTPE
 #include "tiff/TiffTag.h"                // for TiffTag
 #include <map>                           // for map, _Rb_tree_const_iterator
@@ -48,18 +47,19 @@ using TiffEntryOwner = std::unique_ptr<TiffEntry>;
 class TiffIFD
 {
   uint32 nextIFD = 0;
-  TiffIFD* parent = nullptr;
+  TiffIFD* parent;
   std::vector<TiffIFDOwner> subIFDs;
   std::map<TiffTag, TiffEntryOwner> entries;
 
   friend class TiffEntry;
   friend class FiffParser;
-  friend TiffRootIFDOwner parseTiff(const Buffer& data);
+  friend class TiffParser;
 
   // make sure we never copy-constuct/assign a TiffIFD to keep the owning subcontainers contents save
   TiffIFD(const TiffIFD &) = delete;            // NOLINT
   TiffIFD &operator=(const TiffIFD &) = delete; // NOLINT
 
+  void checkOverflow();
   void add(TiffIFDOwner subIFD);
   void add(TiffEntryOwner entry);
   TiffRootIFDOwner parseDngPrivateData(TiffEntry *t);
@@ -68,8 +68,9 @@ class TiffIFD
 
 public:
   TiffIFD() = default;
-  TiffIFD(const DataBuffer& data, uint32 offset, TiffIFD* parent);
+  TiffIFD(TiffIFD* parent, const DataBuffer& data, uint32 offset);
   virtual ~TiffIFD() = default;
+
   uint32 getNextIFD() const {return nextIFD;}
   std::vector<const TiffIFD*> getIFDsWithTag(TiffTag tag) const;
   const TiffIFD* getIFDWithTag(TiffTag tag, uint32 index = 0) const;
@@ -94,8 +95,8 @@ class TiffRootIFD final : public TiffIFD {
 public:
   const DataBuffer rootBuffer;
 
-  TiffRootIFD(const DataBuffer &data, uint32 offset)
-      : TiffIFD(data, offset, nullptr), rootBuffer(data) {}
+  TiffRootIFD(TiffIFD* parent_, const DataBuffer& data, uint32 offset)
+      : TiffIFD(parent_, data, offset), rootBuffer(data) {}
 
   // find the MAKE and MODEL tags identifying the camera
   // note: the returned strings are trimmed automatically
@@ -111,7 +112,7 @@ inline bool isTiffInNativeByteOrder(const ByteStream& bs, uint32 pos, const char
   ThrowTPE("Failed to parse TIFF endianess information in %s.", context);
 }
 
-inline Endianness getTiffEndianness(const FileMap* file) {
+inline Endianness getTiffEndianness(const Buffer* file) {
   ushort16 magic = *(ushort16*)file->getData(0, 2);
   if (magic == 0x4949)
     return little;

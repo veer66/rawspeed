@@ -49,11 +49,27 @@ ThrowException(const char* fmt, ...) {
   va_start(val, fmt);
   vsnprintf(buf, sizeof(buf), fmt, val);
   va_end(val);
-  writeLog(DEBUG_PRIO_EXTRA, "EXCEPTION: %s\n", buf);
+  writeLog(DEBUG_PRIO_EXTRA, "EXCEPTION: %s", buf);
   throw T(buf);
 }
 
+class RawspeedException : public std::runtime_error {
+private:
+  void log(const char* msg) {
+    writeLog(DEBUG_PRIO_EXTRA, "EXCEPTION: %s", msg);
+  }
+
+public:
+  RawspeedException(const std::string& msg) : std::runtime_error(msg) {
+    log(msg.c_str());
+  }
+  RawspeedException(const char* msg) : std::runtime_error(msg) { log(msg); }
+};
+
+#undef XSTR
 #define XSTR(a) #a
+
+#undef STR
 #define STR(a) XSTR(a)
 
 #ifndef DEBUG
@@ -65,19 +81,6 @@ ThrowException(const char* fmt, ...) {
   ThrowException<CLASS>(__FILE__ ":" STR(__LINE__) ": %s: " fmt,               \
                         __PRETTY_FUNCTION__, ##__VA_ARGS__)
 #endif
-
-class RawspeedException : public std::runtime_error {
-private:
-  void log(const char* msg) {
-    writeLog(DEBUG_PRIO_EXTRA, "EXCEPTION: %s\n", msg);
-  }
-
-public:
-  RawspeedException(const std::string& msg) : std::runtime_error(msg) {
-    log(msg.c_str());
-  }
-  RawspeedException(const char* msg) : std::runtime_error(msg) { log(msg); }
-};
 
 #define ThrowRSE(...) ThrowExceptionHelper(RawspeedException, __VA_ARGS__)
 

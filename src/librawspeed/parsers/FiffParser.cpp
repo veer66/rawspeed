@@ -22,15 +22,17 @@
 
 #include "parsers/FiffParser.h"
 #include "common/Common.h"               // for make_unique, uint32, uchar8
+#include "io/Buffer.h"                   // for Buffer
 #include "io/ByteStream.h"               // for ByteStream
 #include "io/Endianness.h"               // for getU32BE, getHostEndianness
 #include "parsers/FiffParserException.h" // for ThrowFPE
-#include "parsers/TiffParser.h"          // for parseTiff, makeDecoder
+#include "parsers/TiffParser.h" // for TiffParser::parse, TiffParser::makeDecoder
 #include "parsers/TiffParserException.h" // for TiffParserException
 #include "tiff/TiffEntry.h"              // for TiffEntry, TiffDataType::TI...
 #include "tiff/TiffIFD.h"                // for TiffIFD, TiffRootIFD, TiffI...
 #include "tiff/TiffTag.h"                // for TiffTag, TiffTag::FUJIOLDWB
 #include <algorithm>                     // for move
+#include <limits>                        // for numeric_limits
 #include <memory>                        // for default_delete, unique_ptr
 
 using namespace std;
@@ -39,35 +41,44 @@ namespace RawSpeed {
 
 class RawDecoder;
 
-FiffParser::FiffParser(FileMap* inputData) : mInput(inputData) {}
+FiffParser::FiffParser(Buffer* inputData) : RawParser(inputData) {}
 
 RawDecoder* FiffParser::getDecoder() {
   const uchar8* data = mInput->getData(0, 104);
 
-  uint32 first_ifd = getU32BE(data + 0x54) + 12;
+  uint32 first_ifd = getU32BE(data + 0x54);
+  if (first_ifd >= numeric_limits<uint32>::max() - 12)
+    ThrowFPE("Not Fiff. First IFD too far away");
+
+  first_ifd += 12;
+
   uint32 second_ifd = getU32BE(data + 0x64);
   uint32 third_ifd = getU32BE(data + 0x5C);
 
   try {
-    TiffRootIFDOwner rootIFD = parseTiff(mInput->getSubView(first_ifd));
+    TiffRootIFDOwner rootIFD = TiffParser::parse(mInput->getSubView(first_ifd));
     TiffIFDOwner subIFD = make_unique<TiffIFD>();
 
     if (mInput->isValid(second_ifd)) {
       // RAW Tiff on newer models, pointer to raw data on older models
       // -> so we try parsing as Tiff first and add it as data if parsing fails
       try {
-        rootIFD->add(parseTiff(mInput->getSubView(second_ifd)));
+        rootIFD->add(TiffParser::parse(mInput->getSubView(second_ifd)));
       } catch (TiffParserException&) {
         // the offset will be interpreted relative to the rootIFD where this
         // subIFD gets inserted
+
+        if (second_ifd <= first_ifd)
+          ThrowFPE("Fiff is corrupted: second IFD is not after the first IFD");
+
         uint32 rawOffset = second_ifd - first_ifd;
         subIFD->add(
-            make_unique<TiffEntry>(FUJI_STRIPOFFSETS, TIFF_OFFSET, 1,
-                                   ByteStream::createCopy(&rawOffset, 4)));
+            make_unique<TiffEntry>(subIFD.get(), FUJI_STRIPOFFSETS, TIFF_OFFSET,
+                                   1, ByteStream::createCopy(&rawOffset, 4)));
         uint32 max_size = mInput->getSize() - second_ifd;
-        subIFD->add(
-            make_unique<TiffEntry>(FUJI_STRIPBYTECOUNTS, TIFF_LONG, 1,
-                                   ByteStream::createCopy(&max_size, 4)));
+        subIFD->add(make_unique<TiffEntry>(
+            subIFD.get(), FUJI_STRIPBYTECOUNTS, TIFF_LONG, 1,
+            ByteStream::createCopy(&max_size, 4)));
       }
     }
 
@@ -94,7 +105,7 @@ RawDecoder* FiffParser::getDecoder() {
 
         uint32 count = type == TIFF_SHORT ? length / 2 : length;
         subIFD->add(make_unique<TiffEntry>(
-            (TiffTag)tag, type, count,
+            subIFD.get(), (TiffTag)tag, type, count,
             bytes.getSubStream(bytes.getPosition(), length)));
 
         bytes.skipBytes(length);
@@ -103,7 +114,7 @@ RawDecoder* FiffParser::getDecoder() {
 
     rootIFD->add(move(subIFD));
 
-    return makeDecoder(move(rootIFD), *mInput);
+    return TiffParser::makeDecoder(move(rootIFD), *mInput);
   } catch (TiffParserException&) {
     ThrowFPE("No decoder found. Sorry.");
   }

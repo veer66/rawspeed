@@ -21,23 +21,32 @@
 
 #pragma once
 
-#include "common/Common.h" // for uint32
-#include "io/FileMap.h"    // for FileMap
-#include "tiff/CiffTag.h"  // for CiffTag
-#include <map>             // for map
-#include <string>          // for string
-#include <vector>          // for vector
+#include "common/Common.h"  // for uint32
+#include "tiff/CiffEntry.h" // IWYU pragma: keep
+#include "tiff/CiffTag.h"   // for CiffTag
+#include <map>              // for map
+#include <memory>           // for unique_ptr
+#include <string>           // for string
+#include <vector>           // for vector
 
 namespace RawSpeed {
 
-class CiffEntry;
+class Buffer;
 
 class CiffIFD final {
+  CiffIFD* parent;
+
 public:
-  CiffIFD(FileMap* f, uint32 start, uint32 end, uint32 depth=0);
-  ~CiffIFD();
-  std::vector<CiffIFD*> mSubIFD;
-  std::map<CiffTag, CiffEntry*> mEntry;
+  CiffIFD(CiffIFD* parent, Buffer* f, uint32 start, uint32 end,
+          uint32 depth = 0);
+
+  std::vector<std::unique_ptr<CiffIFD>> mSubIFD;
+  std::map<CiffTag, std::unique_ptr<CiffEntry>> mEntry;
+
+  void checkOverflow();
+  void add(std::unique_ptr<CiffIFD> subIFD);
+  void add(std::unique_ptr<CiffEntry> entry);
+
   std::vector<CiffIFD*> getIFDsWithTag(CiffTag tag);
   CiffEntry* getEntry(CiffTag tag);
   bool __attribute__((pure)) hasEntry(CiffTag tag);
@@ -47,10 +56,10 @@ public:
   CiffEntry *getEntryRecursiveWhere(CiffTag tag, const std::string &isValue);
   std::vector<CiffIFD *> getIFDsWithTagWhere(CiffTag tag, const std::string &isValue);
   std::vector<CiffIFD*> getIFDsWithTagWhere(CiffTag tag, uint32 isValue);
-  FileMap* getFileMap() { return mFile; }
+  Buffer* getBuffer() { return mFile; }
 
 protected:
-  FileMap *mFile;
+  Buffer* mFile;
   uint32 depth;
 };
 

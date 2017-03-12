@@ -37,12 +37,13 @@ namespace RawSpeed {
 
 // 16 entries of codes per bit length
 // 13 entries of code values
-static const uchar8 pentax_tree[][2][16] = {
+const uchar8 PentaxDecompressor::pentax_tree[][2][16] = {
     {{0, 2, 3, 1, 1, 1, 1, 1, 1, 2, 0, 0, 0, 0, 0, 0},
      {3, 4, 2, 5, 1, 6, 0, 7, 8, 9, 10, 11, 12}},
 };
 
-void decodePentax(RawImage& mRaw, ByteStream&& data, TiffIFD* root) {
+void PentaxDecompressor::decompress(RawImage& mRaw, ByteStream&& data,
+                                    TiffIFD* root) {
 
   HuffmanTable ht;
 
@@ -72,6 +73,7 @@ void decodePentax(RawImage& mRaw, ByteStream&& data, TiffIFD* root) {
         ht.nCodesPerLength.at(v1[c])++;
       }
       /* Find smallest */
+      ht.codeValues.reserve(depth);
       for (uint32 i = 0; i < depth; i++) {
         uint32 sm_val = 0xfffffff;
         uint32 sm_num = 0xff;
@@ -84,6 +86,7 @@ void decodePentax(RawImage& mRaw, ByteStream&& data, TiffIFD* root) {
         ht.codeValues.push_back(sm_num);
         v2[sm_num]=0xffffffff;
       }
+      assert(ht.codeValues.size() == depth);
     } else {
       ThrowRDE("Unknown Huffman table type.");
     }
@@ -107,7 +110,6 @@ void decodePentax(RawImage& mRaw, ByteStream&& data, TiffIFD* root) {
   int pLeft2 = 0;
 
   for (uint32 y = 0;y < h;y++) {
-    bs.checkPos();
     dest = (ushort16*) & draw[y*mRaw->pitch];  // Adjust destination
     pUp1[y&1] += ht.decodeNext(bs);
     pUp2[y&1] += ht.decodeNext(bs);

@@ -20,21 +20,20 @@
 
 #pragma once
 
-#include "io/FileMap.h" // for FileMap
+#include "parsers/RawParser.h" // for RawParser
 
 namespace RawSpeed {
 
+class Buffer;
+
 class RawDecoder;
 
-class FiffParser {
+class FiffParser final : public RawParser {
 public:
-  FiffParser(FileMap* input);
+  FiffParser(Buffer* input);
   virtual ~FiffParser() = default;
 
   virtual RawDecoder* getDecoder();
-
-protected:
-  FileMap* mInput;
 };
 
 } // namespace RawSpeed

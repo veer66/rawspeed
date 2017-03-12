@@ -25,12 +25,16 @@
 
 #include "common/Common.h"    // for uint32, BitOrder
 #include "common/RawImage.h"  // for RawImage
-#include "common/Threading.h" // for pthread_t
-#include "io/FileMap.h"       // for FileMap
 #include "metadata/Camera.h"  // for Hints
 #include <string>             // for string
 
+#ifdef HAVE_PTHREAD
+#include <pthread.h>
+#endif
+
 namespace RawSpeed {
+
+class Buffer;
 
 class CameraMetaData;
 
@@ -56,10 +60,12 @@ class RawDecoderThread
 class RawDecoder
 {
 public:
-  /* Construct decoder instance - FileMap is a filemap of the file to be decoded */
-  /* The FileMap is not owned by this class, will not be deleted, and must remain */
+  /* Construct decoder instance - Buffer is a filemap of the file to be decoded
+   */
+  /* The Buffer is not owned by this class, will not be deleted, and must remain
+   */
   /* valid while this object exists */
-  RawDecoder(FileMap* file);
+  RawDecoder(Buffer* file);
   virtual ~RawDecoder() = default;
 
   /* Check if the decoder can decode the image from this camera */
@@ -123,7 +129,7 @@ public:
 
   /* Retrieve the main RAW chunk */
   /* Returns NULL if unknown */
-  virtual FileMap *getCompressedData() { return nullptr; }
+  virtual Buffer* getCompressedData() { return nullptr; }
 
 protected:
   /* Attempt to decode the image */
@@ -167,7 +173,7 @@ protected:
   void decodeUncompressed(const TiffIFD* rawIFD, BitOrder order);
 
   /* The Raw input file to be decoded */
-  FileMap *mFile;
+  Buffer* mFile;
 
   /* Decoder version */
   /* This can be used to avoid newer version of an xml file to indicate that a file */
@@ -178,14 +184,14 @@ protected:
 
   /* Hints set for the camera after checkCameraSupported has been called from the implementation*/
   Hints hints;
+
+  struct RawSlice;
 };
 
-class RawSlice {
-public:
-  RawSlice() { h = offset = count = 0; }
-  uint32 h;
-  uint32 offset;
-  uint32 count;
+struct RawDecoder::RawSlice {
+  uint32 h = 0;
+  uint32 offset = 0;
+  uint32 count = 0;
 };
 
 } // namespace RawSpeed

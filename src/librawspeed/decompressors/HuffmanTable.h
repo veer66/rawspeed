@@ -26,6 +26,7 @@
 #include <algorithm>                      // for copy
 #include <cassert>                        // for assert
 #include <cstddef>                        // for size_t
+#include <iterator>                       // for distance
 #include <numeric>                        // for accumulate
 #include <vector>                         // for vector, allocator, operator==
 
@@ -131,8 +132,13 @@ public:
 
   void setCodeValues(const Buffer& data) {
     // spec says max 16 but Hasselblad ignores that -> allow 17
-    assert(data.getSize() <= 17);
-    codeValues.assign(data.begin(), data.end());
+    // Canon's old CRW really ignores this ...
+    assert(data.getSize() <= 162);
+    codeValues.clear();
+    const size_t maxCount = std::distance(data.begin(), data.end());
+    codeValues.reserve(maxCount);
+    std::copy(data.begin(), data.end(), std::back_inserter(codeValues));
+    assert(codeValues.size() == maxCount);
   }
 
   void setup(bool fullDecode, bool fixDNGBug16_) {
@@ -144,6 +150,18 @@ public:
     std::vector<ushort16> codes;  // index is just sequential number
 
     int maxCodeLength = nCodesPerLength.size()-1;
+
+    // precompute how much code entries there are
+    size_t maxCodesCount = 0;
+    for (int l = 1; l <= maxCodeLength; ++l) {
+      for (int i = 0; i < nCodesPerLength[l]; ++i) {
+        maxCodesCount++;
+      }
+    }
+
+    // reserve all the memory. avoids lots of small allocs
+    code_len.reserve(maxCodesCount);
+    codes.reserve(maxCodesCount);
 
     // Figure C.1: make table of Huffman code length for each symbol
     // Figure C.2: generate the codes themselves
@@ -157,6 +175,9 @@ public:
       }
       code <<= 1;
     }
+
+    assert(code_len.size() == maxCodesCount);
+    assert(codes.size() == maxCodesCount);
 
     // Figure F.15: generate decoding tables
     codeOffsetOL.resize(maxCodeLength + 1UL, 0xffff);
@@ -262,7 +283,7 @@ public:
       code_l++;
     }
 
-    if (code > maxCodeOL[code_l])
+    if (code_l >= maxCodeOL.size() || code > maxCodeOL[code_l])
       ThrowRDE("bad Huffman code: %u (len: %u)", code, code_l);
 
     int diff_l = codeValues[code - codeOffsetOL[code_l]];

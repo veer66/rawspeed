@@ -58,8 +58,9 @@ enum TiffDataType {
 
 class TiffEntry
 {
+  TiffIFD* parent;
   ByteStream data;
-  TiffIFD* parent = nullptr;
+
   friend class TiffIFD;
 
   template <typename T, T (TiffEntry::* getter)(uint32) const>
@@ -76,8 +77,9 @@ public:
   TiffDataType type;
   uint32 count;
 
-  TiffEntry(TiffTag tag, TiffDataType type, uint32 count, ByteStream&& data);
-  TiffEntry(ByteStream& bs);
+  TiffEntry(TiffIFD* parent, TiffTag tag, TiffDataType type, uint32 count,
+            ByteStream&& data);
+  TiffEntry(TiffIFD* parent, ByteStream& bs);
 
   bool __attribute__((pure)) isFloat() const;
   bool __attribute__((pure)) isInt() const;
@@ -109,6 +111,9 @@ public:
   const uchar8* getData(uint32 size) { return data.getData(size); }
 
   const DataBuffer& getRootIfdData() const;
+
+protected:
+  static const uint32 datashifts[];
 };
 
 } // namespace RawSpeed

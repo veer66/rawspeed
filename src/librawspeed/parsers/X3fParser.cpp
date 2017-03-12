@@ -1,27 +1,28 @@
 /*
-RawSpeed - RAW file decoder.
+    RawSpeed - RAW file decoder.
 
-Copyright (C) 2009-2013 Klaus Post
+    Copyright (C) 2009-2013 Klaus Post
 
-This library is free software; you can redistribute it and/or
-modify it under the terms of the GNU Lesser General Public
-License as published by the Free Software Foundation; either
-version 2 of the License, or (at your option) any later version.
+    This library is free software; you can redistribute it and/or
+    modify it under the terms of the GNU Lesser General Public
+    License as published by the Free Software Foundation; either
+    version 2 of the License, or (at your option) any later version.
 
-This library is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-Lesser General Public License for more details.
+    This library is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+    Lesser General Public License for more details.
 
-You should have received a copy of the GNU Lesser General Public
-License along with this library; if not, write to the Free Software
-Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
+    You should have received a copy of the GNU Lesser General Public
+    License along with this library; if not, write to the Free Software
+    Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
 */
 
 #include "parsers/X3fParser.h"
 #include "common/Common.h"                // for uint32, uchar8
 #include "decoders/RawDecoderException.h" // for ThrowRDE, RawDecoderException
 #include "decoders/X3fDecoder.h"          // for X3fDecoder
+#include "io/Buffer.h"                    // for Buffer
 #include "io/ByteStream.h"                // for ByteStream
 #include "io/Endianness.h"                // for getHostEndianness, Endiann...
 #include "io/IOException.h"               // for IOException
@@ -34,10 +35,9 @@ using namespace std;
 
 namespace RawSpeed {
 
-X3fParser::X3fParser(FileMap* file) {
+X3fParser::X3fParser(Buffer* file) : RawParser(file) {
   decoder = nullptr;
   bytes = nullptr;
-  mFile = file;
   uint32 size = file->getSize();
   if (size<104+128)
     ThrowRDE("X3F file too small");
@@ -70,10 +70,8 @@ X3fParser::X3fParser(FileMap* file) {
 }
 
 void X3fParser::freeObjects() {
-  if (bytes)
-    delete bytes;
-  if (decoder)
-    delete decoder;
+  delete bytes;
+  delete decoder;
   decoder = nullptr;
   bytes = nullptr;
 }
@@ -91,7 +89,7 @@ static string getIdAsString(ByteStream *bytes) {
 
 void X3fParser::readDirectory()
 {
-  bytes->setPosition(mFile->getSize()-4);
+  bytes->setPosition(mInput->getSize() - 4);
   uint32 dir_off = bytes->getU32();
   bytes->setPosition(dir_off);
 

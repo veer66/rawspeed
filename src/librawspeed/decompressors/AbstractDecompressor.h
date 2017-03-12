@@ -20,17 +20,8 @@
 
 #pragma once
 
-#include "rawspeedconfig.h"
+namespace RawSpeed {
 
-#ifndef HAVE_PTHREAD
+class AbstractDecompressor {};
 
-#define pthread_mutex_init(A, B)
-#define pthread_mutex_destroy(A)
-#define pthread_mutex_lock(A)
-#define pthread_mutex_unlock(A)
-
-#else
-
-#include <pthread.h> // IWYU pragma: export
-
-#endif
+} // namespace RawSpeed

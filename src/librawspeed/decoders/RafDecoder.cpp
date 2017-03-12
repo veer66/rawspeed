@@ -22,8 +22,9 @@
 #include "decoders/RafDecoder.h"
 #include "common/Common.h"                          // for uint32, ushort16
 #include "common/Point.h"                           // for iPoint2D, iRecta...
-#include "decoders/RawDecoderException.h"           // for ThrowRDE
+#include "decoders/RawDecoderException.h"           // for RawDecoderExcept...
 #include "decompressors/UncompressedDecompressor.h" // for UncompressedDeco...
+#include "io/Buffer.h"                              // for Buffer
 #include "io/ByteStream.h"                          // for ByteStream
 #include "io/Endianness.h"                          // for getHostEndianness
 #include "metadata/BlackArea.h"                     // for BlackArea
@@ -44,7 +45,7 @@ using namespace std;
 
 namespace RawSpeed {
 
-bool RafDecoder::isRAF(FileMap* input) {
+bool RafDecoder::isRAF(Buffer* input) {
   static const char magic[] = "FUJIFILMCCD-RAW ";
   static const size_t magic_size = sizeof(magic) - 1; // excluding \0
   const unsigned char* data = input->getData(0, magic_size);
@@ -203,15 +204,27 @@ void RafDecoder::decodeMetaDataInternal(const CameraMetaData* meta) {
   mRaw->blackLevel = sensor->mBlackLevel;
 
   // at least the (bayer sensor) X100 comes with a tag like this:
-  if (mRootIFD->hasEntryRecursive(FUJI_RGGBLEVELSBLACK))
-  {
-    TiffEntry *sep_black = mRootIFD->getEntryRecursive(FUJI_RGGBLEVELSBLACK);
+  if (mRootIFD->hasEntryRecursive(FUJI_BLACKLEVEL)) {
+    TiffEntry* sep_black = mRootIFD->getEntryRecursive(FUJI_BLACKLEVEL);
     if (sep_black->count == 4)
     {
       for(int k=0;k<4;k++)
         mRaw->blackLevelSeparate[k] = sep_black->getU32(k);
+    } else if (sep_black->count == 36) {
+      for (int& k : mRaw->blackLevelSeparate)
+        k = 0;
+
+      for (int y = 0; y < 6; y++) {
+        for (int x = 0; x < 6; x++)
+          mRaw->blackLevelSeparate[2 * (y % 2) + (x % 2)] +=
+              sep_black->getU32(6 * y + x);
+      }
+
+      for (int& k : mRaw->blackLevelSeparate)
+        k /= 9;
     }
   }
+
   mRaw->whitePoint = sensor->mWhiteLevel;
   mRaw->blackAreas = cam->blackAreas;
   mRaw->cfa = cam->cfa;

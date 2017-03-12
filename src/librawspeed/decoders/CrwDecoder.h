@@ -21,34 +21,35 @@
 
 #pragma once
 
-#include "common/Common.h"       // for uint32, ushort16, uchar8
+#include "common/Common.h"       // for uint32, uchar8
 #include "common/RawImage.h"     // for RawImage
 #include "decoders/RawDecoder.h" // for RawDecoder
-#include "io/BitPumpJPEG.h"      // for BitPumpJPEG
-#include "io/FileMap.h"          // for FileMap
+#include "tiff/CiffIFD.h"        // for CiffIFD
+#include <array>                 // for array
+#include <memory>                // for unique_ptr
 
 namespace RawSpeed {
 
+class Buffer;
+
 class CameraMetaData;
 
-class CiffIFD;
+class HuffmanTable;
 
 class CrwDecoder final : public RawDecoder {
 public:
-  CrwDecoder(CiffIFD *rootIFD, FileMap* file);
+  CrwDecoder(std::unique_ptr<CiffIFD> rootIFD, Buffer* file);
   RawImage decodeRawInternal() override;
   void checkSupportInternal(const CameraMetaData* meta) override;
   void decodeMetaDataInternal(const CameraMetaData* meta) override;
-  ~CrwDecoder() override;
 
 protected:
+  std::unique_ptr<CiffIFD> mRootIFD;
   int getDecoderVersion() const override { return 0; }
-  CiffIFD *mRootIFD;
-  void makeDecoder(int n, const uchar8 *source);
-  void initHuffTables (uint32 table);
-  uint32 getbithuff (BitPumpJPEG &pump, int nbits, ushort16 *huff);
   void decodeRaw(bool lowbits, uint32 dec_table, uint32 width, uint32 height);
-  ushort16 *mHuff[2];
+  static float canonEv(long in);
+  static HuffmanTable makeDecoder(int n, const uchar8* source);
+  static std::array<HuffmanTable, 2> initHuffTables(uint32 table);
 };
 
 } // namespace RawSpeed

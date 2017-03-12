@@ -19,13 +19,13 @@
     Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
 */
 
-#include "rawspeedconfig.h"
-
+#include "rawspeedconfig.h" // for HAVE_PTHREAD
 #include "decoders/RawDecoder.h"
 #include "common/Common.h"                          // for uint32, getThrea...
 #include "common/Point.h"                           // for iPoint2D, iRecta...
 #include "decoders/RawDecoderException.h"           // for ThrowRDE, RawDec...
 #include "decompressors/UncompressedDecompressor.h" // for UncompressedDeco...
+#include "io/Buffer.h"                              // for Buffer
 #include "io/FileIOException.h"                     // for FileIOException
 #include "io/IOException.h"                         // for IOException
 #include "metadata/BlackArea.h"                     // for BlackArea
@@ -46,7 +46,7 @@ using namespace std;
 
 namespace RawSpeed {
 
-RawDecoder::RawDecoder(FileMap* file) : mRaw(RawImage::create()), mFile(file) {
+RawDecoder::RawDecoder(Buffer* file) : mRaw(RawImage::create()), mFile(file) {
   failOnUnknown = false;
   interpolateBadPixels = true;
   applyStage1DngOpcodes = true;
@@ -108,10 +108,11 @@ void RawDecoder::decodeUncompressed(const TiffIFD *rawIFD, BitOrder order) {
     } catch (IOException &e) {
       if (i>0)
         mRaw->setError(e.what());
-      else
+      else {
         ThrowRDE("IO error occurred in first slice, unable to decode more. "
                  "Error is: %s",
                  e.what());
+      }
     }
     offY += slice.h;
   }
@@ -122,9 +123,10 @@ void RawDecoder::askForSamples(const CameraMetaData* meta, const string& make,
   if ("dng" == mode)
     return;
 
-  writeLog(DEBUG_PRIO_WARNING, "Unable to find camera in database: '%s' '%s' "
-                               "'%s'\nPlease consider providing samples on "
-                               "<https://raw.pixls.us/>, thanks!\n",
+  writeLog(DEBUG_PRIO_WARNING,
+           "Unable to find camera in database: '%s' '%s' "
+           "'%s'\nPlease consider providing samples on "
+           "<https://raw.pixls.us/>, thanks!",
            make.c_str(), model.c_str(), mode.c_str());
 }
 
@@ -188,12 +190,6 @@ void RawDecoder::setMetaData(const CameraMetaData* meta, const string& make,
       new_size.y = mRaw->dim.y - cam->cropPos.y + new_size.y;
 
     mRaw->subFrame(iRectangle2D(cam->cropPos, new_size));
-
-    // Shift CFA to match crop
-    if (cam->cropPos.x & 1)
-      mRaw->cfa.shiftLeft();
-    if (cam->cropPos.y & 1)
-      mRaw->cfa.shiftDown();
   }
 
   const CameraSensorInfo *sensor = cam->getSensorInfo(iso_speed);

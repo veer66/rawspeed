@@ -25,12 +25,13 @@
 #include "decoders/NakedDecoder.h"        // for NakedDecoder
 #include "decoders/RafDecoder.h"          // for RafDecoder
 #include "decoders/RawDecoderException.h" // for RawDecoderException, ThrowRDE
+#include "io/Buffer.h"                    // for Buffer
 #include "metadata/CameraMetaData.h"      // for CameraMetaData
 #include "parsers/CiffParser.h"           // for CiffParser
 #include "parsers/CiffParserException.h"  // for CiffParserException
 #include "parsers/FiffParser.h"           // for FiffParser
 #include "parsers/FiffParserException.h"  // for FiffParserException
-#include "parsers/TiffParser.h"           // for makeDecoder, parseTiff
+#include "parsers/TiffParser.h" // for TiffParser::makeDecoder, TiffParser::parse
 #include "parsers/TiffParserException.h"  // for TiffParserException
 #include "parsers/X3fParser.h"            // for X3fParser
 #include "tiff/TiffEntry.h"               // IWYU pragma: keep
@@ -75,7 +76,7 @@ RawDecoder* RawParser::getDecoder(const CameraMetaData* meta) {
 
   // Ordinary TIFF images
   try {
-    return makeDecoder(parseTiff(*mInput), *mInput);
+    return TiffParser::makeDecoder(TiffParser::parse(*mInput), *mInput);
   } catch (TiffParserException &) {
   }
 

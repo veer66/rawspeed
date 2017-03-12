@@ -24,10 +24,11 @@
 #include "common/Memory.h"                          // for alignedFree, ali...
 #include "common/Point.h"                           // for iPoint2D
 #include "decoders/RawDecoderException.h"           // for ThrowRDE, RawDec...
-#include "decompressors/NikonDecompressor.h"        // for decompressNikon
+#include "decompressors/NikonDecompressor.h" // for NikonDecompressor::decompress
 #include "decompressors/UncompressedDecompressor.h" // for UncompressedDeco...
 #include "io/BitPumpMSB.h"                          // for BitPumpMSB
 #include "io/BitPumpMSB32.h"                        // for BitPumpMSB32
+#include "io/Buffer.h"                              // for Buffer
 #include "io/ByteStream.h"                          // for ByteStream
 #include "io/Endianness.h"                          // for getU16BE, getU32LE
 #include "io/IOException.h"                         // for IOException, Thr...
@@ -43,6 +44,7 @@
 #include <sstream>                                  // for operator<<, ostr...
 #include <string>                                   // for string, operator<<
 #include <vector>                                   // for vector
+// IWYU pragma: no_include <ext/alloc_traits.h>
 
 using namespace std;
 
@@ -106,8 +108,9 @@ RawImage NefDecoder::decodeRawInternal() {
   }
 
   try {
-    decompressNikon(mRaw, ByteStream(mFile, offsets->getU32(), counts->getU32()),
-                    meta->getData(), width, height, bitPerPixel, uncorrectedRawValues);
+    NikonDecompressor::decompress(
+        mRaw, ByteStream(mFile, offsets->getU32(), counts->getU32()),
+        meta->getData(), mRaw->dim, bitPerPixel, uncorrectedRawValues);
   } catch (IOException &e) {
     mRaw->setError(e.what());
     // Let's ignore it, it may have delivered somewhat useful data.
@@ -203,12 +206,14 @@ void NefDecoder::DecodeUncompressed() {
     try {
       if (hints.has("coolpixmangled"))
         readCoolpixMangledRaw(in, size, pos, width*bitPerPixel / 8);
-      else if (hints.has("coolpixsplit"))
-        readCoolpixSplitRaw(in, size, pos, width*bitPerPixel / 8);
       else {
-        UncompressedDecompressor u(in, mRaw, uncorrectedRawValues);
-        u.readUncompressedRaw(size, pos, width * bitPerPixel / 8, bitPerPixel,
-                              bitorder ? BitOrder_Jpeg : BitOrder_Plain);
+        if (hints.has("coolpixsplit"))
+          readCoolpixSplitRaw(in, size, pos, width * bitPerPixel / 8);
+        else {
+          UncompressedDecompressor u(in, mRaw, uncorrectedRawValues);
+          u.readUncompressedRaw(size, pos, width * bitPerPixel / 8, bitPerPixel,
+                                bitorder ? BitOrder_Jpeg : BitOrder_Plain);
+        }
       }
     } catch (RawDecoderException &e) {
       if (i>0)
@@ -218,10 +223,11 @@ void NefDecoder::DecodeUncompressed() {
     } catch (IOException &e) {
       if (i>0)
         mRaw->setError(e.what());
-      else
+      else {
         ThrowRDE("IO error occurred in first slice, unable to decode more. "
                  "Error is: %s",
                  e.what());
+      }
     }
     offY += slice.h;
   }
@@ -568,7 +574,7 @@ void NefDecoder::DecodeNikonSNef(ByteStream &input, uint32 w, uint32 h) {
   ushort16* curve = gammaCurve(1/2.4, 12.92, 1, 4095);
   // Scale output values to 16 bits.
   for (int i = 0 ; i < 4096; i++) {
-    curve[i] = clampBits((uint64)(curve[i]) << 2ULL, 16);
+    curve[i] = clampBits((int)curve[i] << 2, 16);
   }
   mRaw->setTable(curve, 4095, true);
   alignedFree(curve);

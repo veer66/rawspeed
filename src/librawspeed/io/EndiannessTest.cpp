@@ -30,6 +30,8 @@
 using namespace std;
 using namespace RawSpeed;
 
+namespace RawSpeedTest {
+
 TEST(EndiannessTest, getHostEndiannessTests) {
 #if defined(__BYTE_ORDER__)
   ASSERT_EQ(getHostEndiannessRuntime(), getHostEndianness());
@@ -104,8 +106,8 @@ protected:
       memcpy(&in, &(v.first), sizeof(T2));
       memcpy(&expected, &(v.second), sizeof(T2));
     } else {
-      memcpy(&in, &(v.first), sizeof(T2));
-      memcpy(&expected, &(v.second), sizeof(T2));
+      memcpy(&in, &(v.second), sizeof(T2));
+      memcpy(&expected, &(v.first), sizeof(T2));
     }
   }
   T2 getByteSwappedT(const void* data, bool bswap) {
@@ -354,3 +356,5 @@ TEST_P(doubleTest, getNOP) {
     ASSERT_PRED_FORMAT2(HexEquals{}, getBEt(&in), in);
   }
 }
+
+} // namespace RawSpeedTest

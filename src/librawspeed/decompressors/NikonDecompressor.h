@@ -20,13 +20,27 @@
 
 #pragma once
 
-#include "common/Common.h" // for uint32
-#include "io/ByteStream.h" // for ByteStream
+#include "common/Common.h"                      // for uint32
+#include "decompressors/AbstractDecompressor.h" // for AbstractDecompressor
+#include "io/ByteStream.h"                      // for ByteStream
 
 namespace RawSpeed {
 
+class iPoint2D;
+
 class RawImage;
 
-void decompressNikon(RawImage& mRaw, ByteStream&& data, ByteStream meta, uint32 w, uint32 h, uint32 bitsPS, bool uncorrectedRawValues);
+class HuffmanTable;
+
+class NikonDecompressor final : public AbstractDecompressor {
+public:
+  static void decompress(RawImage& mRaw, ByteStream&& data, ByteStream metadata,
+                         const iPoint2D& size, uint32 bitsPS,
+                         bool uncorrectedRawValues);
+
+private:
+  static const uchar8 nikon_tree[][2][16];
+  static HuffmanTable createHuffmanTable(uint32 huffSelect);
+};
 
 } // namespace RawSpeed

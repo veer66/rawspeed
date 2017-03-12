@@ -21,25 +21,27 @@
 
 #pragma once
 
-#include "common/Common.h"       // for uint32, ::BitOrder_Jpeg16
+#include "common/Common.h"       // for uint32, BitOrder::BitOrder_Jpeg16
 #include "common/RawImage.h"     // for RawImage
 #include "decoders/RawDecoder.h" // for RawDecoder
-#include "io/FileMap.h"          // for FileMap
+#include <map>                   // for map
+#include <string>                // for string, basic_st...
 
 namespace RawSpeed {
 
 class Camera;
-
 class CameraMetaData;
+class Buffer;
 
 class NakedDecoder final : public RawDecoder {
 public:
-  NakedDecoder(FileMap* file, const Camera* c);
+  NakedDecoder(Buffer* file, const Camera* c);
   RawImage decodeRawInternal() override;
   void checkSupportInternal(const CameraMetaData* meta) override;
   void decodeMetaDataInternal(const CameraMetaData* meta) override;
 
 private:
+  static const std::map<std::string, BitOrder> order2enum;
   void parseHints();
 
 protected:

@@ -19,12 +19,14 @@
     Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
 */
 
+#include "rawspeedconfig.h"
 #include "decoders/Rw2Decoder.h"
 #include "common/Common.h"                          // for uint32, uchar8
 #include "common/Point.h"                           // for iPoint2D
 #include "decoders/RawDecoder.h"                    // for RawDecoderThread
-#include "decoders/RawDecoderException.h"           // for ThrowRDE
+#include "decoders/RawDecoderException.h"           // for RawDecoderExcept...
 #include "decompressors/UncompressedDecompressor.h" // for UncompressedDeco...
+#include "io/Buffer.h"                              // for Buffer
 #include "io/ByteStream.h"                          // for ByteStream
 #include "metadata/Camera.h"                        // for Hints
 #include "metadata/ColorFilterArray.h"              // for CFAColor::CFA_GREEN
@@ -35,9 +37,12 @@
 #include <cmath>                                    // for fabs
 #include <cstring>                                  // for memcpy
 #include <memory>                                   // for unique_ptr
-#include <pthread.h>                                // for pthread_mutex_lock
 #include <string>                                   // for string, allocator
 #include <vector>                                   // for vector
+
+#ifdef HAVE_PTHREAD
+#include <pthread.h>
+#endif
 
 using namespace std;
 
@@ -45,8 +50,7 @@ namespace RawSpeed {
 
 class CameraMetaData;
 
-struct PanaBitpump
-{
+struct Rw2Decoder::PanaBitpump {
   static constexpr uint32 BufSize = 0x4000;
   ByteStream input;
   vector<uchar8> buf;
@@ -220,9 +224,13 @@ void Rw2Decoder::decodeThreaded(RawDecoderThread * t) {
     }
   }
   if (zero_is_bad && !zero_pos.empty()) {
+#ifdef HAVE_PTHREAD
     pthread_mutex_lock(&mRaw->mBadPixelMutex);
+#endif
     mRaw->mBadPixelPositions.insert(mRaw->mBadPixelPositions.end(), zero_pos.begin(), zero_pos.end());
+#ifdef HAVE_PTHREAD
     pthread_mutex_unlock(&mRaw->mBadPixelMutex);
+#endif
   }
 }
 
@@ -322,7 +330,7 @@ std::string Rw2Decoder::guessMode() {
     closest_match = "1:1";
     min_diff  = t;
   }
-  writeLog(DEBUG_PRIO_EXTRA, "Mode guess: '%s'\n", closest_match.c_str());
+  writeLog(DEBUG_PRIO_EXTRA, "Mode guess: '%s'", closest_match.c_str());
   return closest_match;
 }
 

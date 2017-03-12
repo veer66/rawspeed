@@ -37,9 +37,11 @@ namespace RawSpeed {
 
 RawImageData::RawImageData() : cfa(iPoint2D(0, 0)) {
   fill_n(blackLevelSeparate, 4, -1);
+#ifdef HAVE_PTHREAD
   pthread_mutex_init(&mymutex, nullptr);
   pthread_mutex_init(&errMutex, nullptr);
   pthread_mutex_init(&mBadPixelMutex, nullptr);
+#endif
 }
 
 RawImageData::RawImageData(const iPoint2D& _dim, uint32 _bpc, uint32 _cpp)
@@ -47,9 +49,11 @@ RawImageData::RawImageData(const iPoint2D& _dim, uint32 _bpc, uint32 _cpp)
       bpp(_bpc * _cpp) {
   fill_n(blackLevelSeparate, 4, -1);
   createData();
+#ifdef HAVE_PTHREAD
   pthread_mutex_init(&mymutex, nullptr);
   pthread_mutex_init(&errMutex, nullptr);
   pthread_mutex_init(&mBadPixelMutex, nullptr);
+#endif
 }
 
 ImageMetaData::ImageMetaData() {
@@ -63,12 +67,14 @@ ImageMetaData::ImageMetaData() {
 RawImageData::~RawImageData() {
   assert(dataRefCount == 0);
   mOffset = iPoint2D(0, 0);
+#ifdef HAVE_PTHREAD
   pthread_mutex_destroy(&mymutex);
   pthread_mutex_destroy(&errMutex);
   pthread_mutex_destroy(&mBadPixelMutex);
-  if (table != nullptr) {
-    delete table;
-  }
+#endif
+
+  delete table;
+
   errors.clear();
   destroyData();
 }
@@ -100,10 +106,12 @@ void RawImageData::destroyData() {
 void RawImageData::setCpp(uint32 val) {
   if (data)
     ThrowRDE("Attempted to set Components per pixel after data allocation");
-  if (val > 4)
+  if (val > 4) {
     ThrowRDE(
         "Only up to 4 components per pixel is support - attempted to set: %d",
         val);
+  }
+
   bpp /= cpp;
   cpp = val;
   bpp *= val;
@@ -154,12 +162,21 @@ iPoint2D __attribute__((pure)) RawImageData::getCropOffset() const {
 
 void RawImageData::subFrame(iRectangle2D crop) {
   if (!crop.dim.isThisInside(dim - crop.pos)) {
-    writeLog(DEBUG_PRIO_WARNING, "WARNING: RawImageData::subFrame - Attempted to create new subframe larger than original size. Crop skipped.\n");
+    writeLog(DEBUG_PRIO_WARNING, "WARNING: RawImageData::subFrame - Attempted "
+                                 "to create new subframe larger than original "
+                                 "size. Crop skipped.");
     return;
   }
   if (crop.pos.x < 0 || crop.pos.y < 0 || !crop.hasPositiveArea()) {
-    writeLog(DEBUG_PRIO_WARNING, "WARNING: RawImageData::subFrame - Negative crop offset. Crop skipped.\n");
+    writeLog(DEBUG_PRIO_WARNING, "WARNING: RawImageData::subFrame - Negative "
+                                 "crop offset. Crop skipped.");
     return;
+  }
+
+  // if CFA, and not X-Trans, adjust.
+  if (isCFA && cfa.getDcrawFilter() != 1 && cfa.getDcrawFilter() != 9) {
+    cfa.shiftLeft(crop.pos.x);
+    cfa.shiftDown(crop.pos.y);
   }
 
   mOffset += crop.pos;
@@ -167,9 +184,13 @@ void RawImageData::subFrame(iRectangle2D crop) {
 }
 
 void RawImageData::setError(const string& err) {
+#ifdef HAVE_PTHREAD
   pthread_mutex_lock(&errMutex);
+#endif
   errors.push_back(err);
+#ifdef HAVE_PTHREAD
   pthread_mutex_unlock(&errMutex);
+#endif
 }
 
 void RawImageData::createBadPixelMap()
@@ -184,25 +205,39 @@ void RawImageData::createBadPixelMap()
 }
 
 RawImage::RawImage(RawImageData* p) : p_(p) {
+#ifdef HAVE_PTHREAD
   pthread_mutex_lock(&p_->mymutex);
+#endif
   ++p_->dataRefCount;
+#ifdef HAVE_PTHREAD
   pthread_mutex_unlock(&p_->mymutex);
+#endif
 }
 
 RawImage::RawImage(const RawImage& p) : p_(p.p_) {
+#ifdef HAVE_PTHREAD
   pthread_mutex_lock(&p_->mymutex);
+#endif
   ++p_->dataRefCount;
+#ifdef HAVE_PTHREAD
   pthread_mutex_unlock(&p_->mymutex);
+#endif
 }
 
 RawImage::~RawImage() {
+#ifdef HAVE_PTHREAD
   pthread_mutex_lock(&p_->mymutex);
+#endif
   if (--p_->dataRefCount == 0) {
+#ifdef HAVE_PTHREAD
     pthread_mutex_unlock(&p_->mymutex);
+#endif
     delete p_;
     return;
   }
+#ifdef HAVE_PTHREAD
   pthread_mutex_unlock(&p_->mymutex);
+#endif
 }
 
 void RawImageData::copyErrorsFrom(const RawImage& other) {
@@ -417,7 +452,9 @@ void RawImageData::clearArea( iRectangle2D area, uchar8 val /*= 0*/ )
 RawImage& RawImage::operator=(const RawImage& p) noexcept {
   if (this == &p)      // Same object?
     return *this;      // Yes, so skip assignment, and just return *this.
+#ifdef HAVE_PTHREAD
   pthread_mutex_lock(&p_->mymutex);
+#endif
   // Retain the old RawImageData before overwriting it
   RawImageData* const old = p_;
   p_ = p.p_;
@@ -425,10 +462,14 @@ RawImage& RawImage::operator=(const RawImage& p) noexcept {
   ++p_->dataRefCount;
   // If the RawImageData previously used by "this" is unused, delete it.
   if (--old->dataRefCount == 0) {
-  	pthread_mutex_unlock(&(old->mymutex));
-  	delete old;
+#ifdef HAVE_PTHREAD
+    pthread_mutex_unlock(&(old->mymutex));
+#endif
+    delete old;
   } else {
-  	pthread_mutex_unlock(&(old->mymutex));
+#ifdef HAVE_PTHREAD
+    pthread_mutex_unlock(&(old->mymutex));
+#endif
   }
   return *this;
 }
@@ -509,13 +550,15 @@ void RawImageData::sixteenBitLookup() {
 
 void RawImageData::setTable( TableLookUp *t )
 {
-  if (table != nullptr) {
-    delete table;
-  }
+  delete table;
+
   table = t;
 }
 
 void RawImageData::setTable(const ushort16 *table_, int nfilled, bool dither) {
+  assert(table_);
+  assert(nfilled > 0);
+
   auto *t = new TableLookUp(1, dither);
   t->setTable(0, table_, nfilled);
   this->setTable(t);
@@ -535,14 +578,15 @@ TableLookUp::TableLookUp( int _ntables, bool _dither ) : ntables(_ntables), dith
 
 TableLookUp::~TableLookUp()
 {
-  if (tables != nullptr) {
-    delete[] tables;
-    tables = nullptr;
-  }
+  delete[] tables;
+  tables = nullptr;
 }
 
 
 void TableLookUp::setTable(int ntable, const ushort16 *table , int nfilled) {
+  assert(table);
+  assert(nfilled > 0);
+
   if (ntable > ntables) {
     ThrowRDE("Table lookup with number greater than number of tables.");
   }

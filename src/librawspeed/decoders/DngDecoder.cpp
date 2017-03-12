@@ -18,14 +18,14 @@
     Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
 */
 
-#include "rawspeedconfig.h"
-
+#include "rawspeedconfig.h" // for HAVE_JPEG, HAVE_ZLIB
 #include "decoders/DngDecoder.h"
 #include "common/Common.h"                // for uint32, uchar8, writeLog
 #include "common/DngOpcodes.h"            // for DngOpcodes
 #include "common/Point.h"                 // for iPoint2D, iRectangle2D
 #include "decoders/DngDecoderSlices.h"    // for DngDecoderSlices, DngSlice...
 #include "decoders/RawDecoderException.h" // for ThrowRDE, RawDecoderException
+#include "io/Buffer.h"                    // for Buffer
 #include "metadata/BlackArea.h"           // for BlackArea
 #include "metadata/Camera.h"              // for Camera
 #include "metadata/CameraMetaData.h"      // for CameraMetaData
@@ -38,7 +38,7 @@
 #include <cstdio>                         // for printf
 #include <cstring>                        // for memset
 #include <map>                            // for map
-#include <memory>                         // for unique_ptr
+#include <memory>                         // for unique_ptr, allocator_trai...
 #include <stdexcept>                      // for out_of_range
 #include <string>                         // for string, operator+, basic_s...
 #include <vector>                         // for vector, allocator
@@ -47,9 +47,8 @@ using namespace std;
 
 namespace RawSpeed {
 
-DngDecoder::DngDecoder(TiffRootIFDOwner&& rootIFD, FileMap* file)
-  : AbstractTiffDecoder(move(rootIFD), file)
-{
+DngDecoder::DngDecoder(TiffRootIFDOwner&& rootIFD, Buffer* file)
+    : AbstractTiffDecoder(move(rootIFD), file) {
   const uchar8* v = mRootIFD->getEntryRecursive(DNGVERSION)->getData(4);
 
   if (v[0] != 1)
@@ -154,7 +153,7 @@ void DngDecoder::parseCFA(const TiffIFD* raw) {
 
   mRaw->cfa.setSize(cfaSize);
 
-  const map<uint32, CFAColor> int2enum = {
+  static const map<uint32, CFAColor> int2enum = {
       {0, CFA_RED},     {1, CFA_GREEN},  {2, CFA_BLUE},  {3, CFA_CYAN},
       {4, CFA_MAGENTA}, {5, CFA_YELLOW}, {6, CFA_WHITE},
   };
@@ -176,8 +175,6 @@ void DngDecoder::parseCFA(const TiffIFD* raw) {
 }
 
 void DngDecoder::decodeData(const TiffIFD* raw, int compression, uint32 sample_format) {
-  mRaw->createData();
-
   if (compression == 8 && sample_format != 3) {
     ThrowRDE("Only float format is supported for "
              "deflate-compressed data.");
@@ -215,11 +212,10 @@ void DngDecoder::decodeData(const TiffIFD* raw, int compression, uint32 sample_f
 
     for (uint32 y = 0; y < tilesY; y++) {
       for (uint32 x = 0; x < tilesX; x++) {
-        DngSliceElement e(offsets->getU32(x + y * tilesX),
-                          counts->getU32(x + y * tilesX), tilew * x, tileh * y,
-                          tilew, tileh);
-        e.mUseBigtable = tilew * tileh > 1024 * 1024;
-        slices.addSlice(e);
+        auto e = make_unique<DngSliceElement>(
+            offsets->getU32(x + y * tilesX), counts->getU32(x + y * tilesX),
+            tilew * x, tileh * y, tilew, tileh);
+        slices.addSlice(move(e));
       }
     }
   } else { // Strips
@@ -240,24 +236,26 @@ void DngDecoder::decodeData(const TiffIFD* raw, int compression, uint32 sample_f
 
     uint32 offY = 0;
     for (uint32 s = 0; s < counts->count; s++) {
-      DngSliceElement e(offsets->getU32(s), counts->getU32(s), 0, offY,
-                        mRaw->dim.x, yPerSlice);
-      e.mUseBigtable = yPerSlice * mRaw->dim.y > 1024 * 1024;
+      auto e =
+          make_unique<DngSliceElement>(offsets->getU32(s), counts->getU32(s), 0,
+                                       offY, mRaw->dim.x, yPerSlice);
       offY += yPerSlice;
 
-      if (mFile->isValid(e.byteOffset,
-                         e.byteCount)) // Only decode if size is valid
-        slices.addSlice(e);
+      if (mFile->isValid(e->byteOffset,
+                         e->byteCount)) // Only decode if size is valid
+        slices.addSlice(move(e));
     }
   }
   uint32 nSlices = slices.size();
   if (!nSlices)
     ThrowRDE("No valid slices found.");
 
+  mRaw->createData();
+
   slices.startDecoding();
 
   if (mRaw->errors.size() >= nSlices) {
-    ThrowRDE("Too many errors encountered. Giving up.\nFirst Error:%s",
+    ThrowRDE("Too many errors encountered. Giving up. First Error:\n%s",
              mRaw->errors[0].c_str());
   }
 }
@@ -286,19 +284,25 @@ RawImage DngDecoder::decodeRawInternal() {
 
   int compression = raw->getEntry(COMPRESSION)->getU16();
 
-  if (sample_format == 1)
+  switch (sample_format) {
+  case 1:
     mRaw = RawImage::create(TYPE_USHORT16);
-  else if (sample_format == 3)
+    break;
+  case 3:
     mRaw = RawImage::create(TYPE_FLOAT32);
-  else
-    ThrowRDE("Only 16 bit unsigned or float point data supported.");
+    break;
+  default:
+    ThrowRDE("Only 16 bit unsigned or float point data supported. Sample "
+             "format %u is not supported.",
+             sample_format);
+  }
 
   mRaw->isCFA = (raw->getEntry(PHOTOMETRICINTERPRETATION)->getU16() == 32803);
 
   if (mRaw->isCFA)
-    writeLog(DEBUG_PRIO_EXTRA, "This is a CFA image\n");
+    writeLog(DEBUG_PRIO_EXTRA, "This is a CFA image");
   else {
-    writeLog(DEBUG_PRIO_EXTRA, "This is NOT a CFA image\n");
+    writeLog(DEBUG_PRIO_EXTRA, "This is NOT a CFA image");
   }
 
   if (sample_format == 1 && bps > 16)
@@ -307,54 +311,21 @@ RawImage DngDecoder::decodeRawInternal() {
   if (sample_format == 3 && bps != 32 && compression != 8)
     ThrowRDE("Uncompressed float point must be 32 bits per sample.");
 
-  try {
-    mRaw->dim.x = raw->getEntry(IMAGEWIDTH)->getU32();
-    mRaw->dim.y = raw->getEntry(IMAGELENGTH)->getU32();
-  } catch (TiffParserException &) {
-    ThrowRDE("Could not read basic image information.");
-  }
+  mRaw->dim.x = raw->getEntry(IMAGEWIDTH)->getU32();
+  mRaw->dim.y = raw->getEntry(IMAGELENGTH)->getU32();
 
-  try {
+  if (mRaw->isCFA)
+    parseCFA(raw);
 
-    if (mRaw->isCFA)
-      parseCFA(raw);
+  uint32 cpp = raw->getEntry(SAMPLESPERPIXEL)->getU32();
 
-    uint32 cpp = raw->getEntry(SAMPLESPERPIXEL)->getU32();
+  if (cpp > 4)
+    ThrowRDE("More than 4 samples per pixel is not supported.");
 
-    if (cpp > 4)
-      ThrowRDE("More than 4 samples per pixel is not supported.");
+  mRaw->setCpp(cpp);
 
-    mRaw->setCpp(cpp);
-
-    // Now load the image
-    try {
-      decodeData(raw, compression, sample_format);
-    } catch (TiffParserException& e) {
-      ThrowRDE("Unsupported format, tried strips and tiles:\n%s", e.what());
-    }
-  } catch (TiffParserException &e) {
-    ThrowRDE("Image could not be read:\n%s", e.what());
-  }
-
-  // Fetch the white balance
-  if (mRootIFD->hasEntryRecursive(ASSHOTNEUTRAL)) {
-    TiffEntry *as_shot_neutral = mRootIFD->getEntryRecursive(ASSHOTNEUTRAL);
-    if (as_shot_neutral->count == 3) {
-      for (uint32 i=0; i<3; i++)
-        mRaw->metadata.wbCoeffs[i] = 1.0f/as_shot_neutral->getFloat(i);
-    }
-  } else if (mRootIFD->hasEntryRecursive(ASSHOTWHITEXY)) {
-    TiffEntry *as_shot_white_xy = mRootIFD->getEntryRecursive(ASSHOTWHITEXY);
-    if (as_shot_white_xy->count == 2) {
-      mRaw->metadata.wbCoeffs[0] = as_shot_white_xy->getFloat(0);
-      mRaw->metadata.wbCoeffs[1] = as_shot_white_xy->getFloat(1);
-      mRaw->metadata.wbCoeffs[2] = 1 - mRaw->metadata.wbCoeffs[0] - mRaw->metadata.wbCoeffs[1];
-
-      const float d65_white[3] = { 0.950456, 1, 1.088754 };
-      for (uint32 i=0; i<3; i++)
-          mRaw->metadata.wbCoeffs[i] /= d65_white[i];
-    }
-  }
+  // Now load the image
+  decodeData(raw, compression, sample_format);
 
   // Crop
   if (raw->hasEntry(ACTIVEAREA)) {
@@ -394,10 +365,6 @@ RawImage DngDecoder::decodeRawInternal() {
       ThrowRDE("No positive crop area");
 
     mRaw->subFrame(cropped);
-    if (mRaw->isCFA && cropped.pos.x %2 == 1)
-      mRaw->cfa.shiftLeft();
-    if (mRaw->isCFA && cropped.pos.y %2 == 1)
-      mRaw->cfa.shiftDown();
   }
   if (mRaw->dim.area() <= 0)
     ThrowRDE("No image left after crop");
@@ -409,7 +376,7 @@ RawImage DngDecoder::decodeRawInternal() {
       // Apply stage 1 codes
       try{
         DngOpcodes codes(raw->getEntry(OPCODELIST1));
-        mRaw = codes.applyOpCodes(mRaw);
+        codes.applyOpCodes(mRaw);
       } catch (RawDecoderException &e) {
         // We push back errors from the opcode parser, since the image may still be usable
         mRaw->setError(e.what());
@@ -418,7 +385,8 @@ RawImage DngDecoder::decodeRawInternal() {
   }
 
   // Linearization
-  if (raw->hasEntry(LINEARIZATIONTABLE)) {
+  if (raw->hasEntry(LINEARIZATIONTABLE) &&
+      raw->getEntry(LINEARIZATIONTABLE)->count > 0) {
     TiffEntry *lintable = raw->getEntry(LINEARIZATIONTABLE);
     auto table = lintable->getU16Array(lintable->count);
     mRaw->setTable(table.data(), table.size(), !uncorrectedRawValues);
@@ -459,7 +427,7 @@ RawImage DngDecoder::decodeRawInternal() {
       // Apply stage 2 codes
       try{
         DngOpcodes codes(raw->getEntry(OPCODELIST2));
-        mRaw = codes.applyOpCodes(mRaw);
+        codes.applyOpCodes(mRaw);
       } catch (RawDecoderException &e) {
         // We push back errors from the opcode parser, since the image may still be usable
         mRaw->setError(e.what());
@@ -508,6 +476,27 @@ void DngDecoder::decodeMetaDataInternal(const CameraMetaData* meta) {
       mRaw->metadata.canonical_id = mRootIFD->getEntryRecursive(UNIQUECAMERAMODEL)->getString();
     } else {
       mRaw->metadata.canonical_id = id.make + " " + id.model;
+    }
+  }
+
+  // Fetch the white balance
+  if (mRootIFD->hasEntryRecursive(ASSHOTNEUTRAL)) {
+    TiffEntry* as_shot_neutral = mRootIFD->getEntryRecursive(ASSHOTNEUTRAL);
+    if (as_shot_neutral->count == 3) {
+      for (uint32 i = 0; i < 3; i++)
+        mRaw->metadata.wbCoeffs[i] = 1.0f / as_shot_neutral->getFloat(i);
+    }
+  } else if (mRootIFD->hasEntryRecursive(ASSHOTWHITEXY)) {
+    TiffEntry* as_shot_white_xy = mRootIFD->getEntryRecursive(ASSHOTWHITEXY);
+    if (as_shot_white_xy->count == 2) {
+      mRaw->metadata.wbCoeffs[0] = as_shot_white_xy->getFloat(0);
+      mRaw->metadata.wbCoeffs[1] = as_shot_white_xy->getFloat(1);
+      mRaw->metadata.wbCoeffs[2] =
+          1 - mRaw->metadata.wbCoeffs[0] - mRaw->metadata.wbCoeffs[1];
+
+      const float d65_white[3] = {0.950456, 1, 1.088754};
+      for (uint32 i = 0; i < 3; i++)
+        mRaw->metadata.wbCoeffs[i] /= d65_white[i];
     }
   }
 }

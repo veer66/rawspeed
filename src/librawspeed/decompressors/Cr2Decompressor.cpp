@@ -1,22 +1,22 @@
 /*
-RawSpeed - RAW file decoder.
+    RawSpeed - RAW file decoder.
 
-Copyright (C) 2009-2014 Klaus Post
-Copyright (C) 2017 Axel Waggershauser
+    Copyright (C) 2009-2014 Klaus Post
+    Copyright (C) 2017 Axel Waggershauser
 
-This library is free software; you can redistribute it and/or
-modify it under the terms of the GNU Lesser General Public
-License as published by the Free Software Foundation; either
-version 2 of the License, or (at your option) any later version.
+    This library is free software; you can redistribute it and/or
+    modify it under the terms of the GNU Lesser General Public
+    License as published by the Free Software Foundation; either
+    version 2 of the License, or (at your option) any later version.
 
-This library is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-Lesser General Public License for more details.
+    This library is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+    Lesser General Public License for more details.
 
-You should have received a copy of the GNU Lesser General Public
-License along with this library; if not, write to the Free Software
-Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
+    You should have received a copy of the GNU Lesser General Public
+    License along with this library; if not, write to the Free Software
+    Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
 */
 
 #include "decompressors/Cr2Decompressor.h"
@@ -26,6 +26,7 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
 #include "io/BitPumpJPEG.h"               // for BitStream<>::getBufferPosi...
 #include "io/ByteStream.h"                // for ByteStream
 #include <algorithm>                      // for min, copy_n, move
+#include <cassert>                        // for assert
 
 using namespace std;
 
@@ -58,15 +59,21 @@ void Cr2Decompressor::decodeScan()
 
     if (frame.compInfo[0].superV == 2)
       decodeN_X_Y<3, 2, 2>(); // Cr2 sRaw1/mRaw
-    else // frame.compInfo[0].superV == 1
+    else {
+      assert(frame.compInfo[0].superV == 1);
       decodeN_X_Y<3, 2, 1>(); // Cr2 sRaw2/sRaw
+    }
   } else {
-    if (frame.cps == 2)
+    switch (frame.cps) {
+    case 2:
       decodeN_X_Y<2, 1, 1>();
-    else if (frame.cps == 4)
+      break;
+    case 4:
       decodeN_X_Y<4, 1, 1>();
-    else
-      ThrowRDE("Unsupported number of components");
+      break;
+    default:
+      ThrowRDE("Unsupported number of components: %u", frame.cps);
+    }
   }
 }
 

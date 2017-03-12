@@ -32,13 +32,13 @@
 #endif
 
 // define this function, it is only declared in rawspeed:
-int rawspeed_get_number_of_processor_cores() {
 #ifdef _OPENMP
-  return omp_get_num_procs();
+int rawspeed_get_number_of_processor_cores() { return omp_get_num_procs(); }
 #else
+int __attribute__((const)) rawspeed_get_number_of_processor_cores() {
   return 1;
-#endif
 }
+#endif
 
 using namespace RawSpeed;
 
@@ -136,7 +136,7 @@ int main(int argc, char *argv[]) {
 
     FileReader f(argv[1]);
 
-    std::unique_ptr<FileMap> m(f.readFile());
+    std::unique_ptr<Buffer> m(f.readFile());
 
     RawParser t(m.get());
 

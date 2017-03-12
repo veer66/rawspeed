@@ -24,11 +24,14 @@
 
 #include "common/Common.h"             // for uint32, uchar8, ushort16, wri...
 #include "common/Point.h"              // for iPoint2D, iRectangle2D (ptr o...
-#include "common/Threading.h"          // for pthread_mutex_t, pthread_attr_t
 #include "metadata/BlackArea.h"        // for BlackArea
 #include "metadata/ColorFilterArray.h" // for ColorFilterArray
 #include <string>                      // for string
 #include <vector>                      // for vector
+
+#ifdef HAVE_PTHREAD
+#include <pthread.h>
+#endif
 
 namespace RawSpeed {
 
@@ -191,9 +194,13 @@ class RawImageDataU16 final : public RawImageData {
 public:
   void scaleBlackWhite() override;
   void calculateBlackAreas() override;
-  void setWithLookUp(ushort16 value, uchar8* dst, uint32* random) final;
+  void setWithLookUp(ushort16 value, uchar8* dst, uint32* random) override;
 
 protected:
+  void scaleValues_plain(int start_y, int end_y);
+#if _MSC_VER > 1399 || defined(__SSE2__)
+  void scaleValues_SSE2(int start_y, int end_y);
+#endif
   void scaleValues(int start_y, int end_y) override;
   void fixBadPixel(uint32 x, uint32 y, int component = 0) override;
   void doLookup(int start_y, int end_y) override;
@@ -245,7 +252,7 @@ inline RawImage RawImage::create(RawImageType type)  {
     case TYPE_FLOAT32:
       return new RawImageDataFloat();
     default:
-      writeLog(DEBUG_PRIO_ERROR, "RawImage::create: Unknown Image type!\n");
+      writeLog(DEBUG_PRIO_ERROR, "RawImage::create: Unknown Image type!");
   }
   return nullptr;
 }
@@ -256,7 +263,7 @@ inline RawImage RawImage::create(const iPoint2D &dim, RawImageType type,
     case TYPE_USHORT16:
       return new RawImageDataU16(dim, componentsPerPixel);
     default:
-      writeLog(DEBUG_PRIO_ERROR, "RawImage::create: Unknown Image type!\n");
+      writeLog(DEBUG_PRIO_ERROR, "RawImage::create: Unknown Image type!");
   }
   return nullptr;
 }

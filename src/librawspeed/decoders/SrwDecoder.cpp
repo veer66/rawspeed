@@ -23,8 +23,10 @@
 #include "common/Common.h"                // for uint32, ushort16, int32
 #include "common/Point.h"                 // for iPoint2D
 #include "decoders/RawDecoderException.h" // for ThrowRDE, RawDecoderException
-#include "decompressors/HuffmanTable.h"   // for HuffmanTable::signExtend
+#include "decompressors/HuffmanTable.h"   // for HuffmanTable
+#include "io/BitPumpMSB.h"                // for BitPumpMSB
 #include "io/BitPumpMSB32.h"              // for BitPumpMSB32
+#include "io/Buffer.h"                    // for Buffer
 #include "io/ByteStream.h"                // for ByteStream
 #include "io/Endianness.h"                // for getHostEndianness, Endiann...
 #include "metadata/Camera.h"              // for Hints
@@ -179,7 +181,6 @@ void SrwDecoder::decodeCompressed( const TiffIFD* raw )
           img[c] = adj + pred_left;
         }
       }
-      bits.checkPos();
       img += 16;
       img_up += 16;
       img_up2 += 16;
@@ -200,6 +201,11 @@ void SrwDecoder::decodeCompressed( const TiffIFD* raw )
   }
 }
 
+struct SrwDecoder::encTableItem {
+  uchar8 encLen;
+  uchar8 diffLen;
+};
+
 // Decoder for compressed srw files (NX3000 and later)
 void SrwDecoder::decodeCompressed2( const TiffIFD* raw, int bits)
 {
@@ -218,7 +224,7 @@ void SrwDecoder::decodeCompressed2( const TiffIFD* raw, int bits)
   // difference) and 13 bits (differences between 12 bits numbers can need 13)
   const uchar8 tab[14][2] = {{3,4}, {3,7}, {2,6}, {2,5}, {4,3}, {6,0}, {7,9},
                                {8,10}, {9,11}, {10,12}, {10,13}, {5,1}, {4,8}, {4,2}};
-  encTableItem tbl[1024];
+  vector<encTableItem> tbl(1024);
   ushort16 vpred[2][2] = {{0,0},{0,0}}, hpred[2];
 
   // We generate a 1024 entry table (to be addressed by reading 10 bits) by
@@ -252,15 +258,15 @@ void SrwDecoder::decodeCompressed2( const TiffIFD* raw, int bits)
   }
 }
 
-int32 SrwDecoder::samsungDiff (BitPumpMSB &pump, encTableItem *tbl)
-{
+int32 SrwDecoder::samsungDiff(BitPumpMSB& pump,
+                              const vector<encTableItem>& tbl) {
   // We read 10 bits to index into our table
   uint32 c = pump.peekBits(10);
   // Skip the bits that were used to encode this case
-  pump.getBitsSafe(tbl[c].encLen);
+  pump.getBits(tbl[c].encLen);
   // Read the number of bits the table tells me
   int32 len = tbl[c].diffLen;
-  int32 diff = pump.getBitsSafe(len);
+  int32 diff = pump.getBits(len);
 
   // If the first bit is 0 we need to turn this into a negative number
   diff = len ? HuffmanTable::signExtended(diff, len) : diff;
@@ -281,28 +287,28 @@ void SrwDecoder::decodeCompressed3(const TiffIFD* raw, int bits)
 
   // Process the initial metadata bits, we only really use initVal, width and
   // height (the last two match the TIFF values anyway)
-  startpump.getBitsSafe(16); // NLCVersion
-  startpump.getBitsSafe(4);  // ImgFormat
-  uint32 bitDepth = startpump.getBitsSafe(4)+1;
-  startpump.getBitsSafe(4);  // NumBlkInRCUnit
-  startpump.getBitsSafe(4);  // CompressionRatio
-  uint32 width    = startpump.getBitsSafe(16);
-  uint32 height    = startpump.getBitsSafe(16);
-  startpump.getBitsSafe(16); // TileWidth
-  startpump.getBitsSafe(4);  // reserved
+  startpump.getBits(16); // NLCVersion
+  startpump.getBits(4);  // ImgFormat
+  uint32 bitDepth = startpump.getBits(4)+1;
+  startpump.getBits(4);  // NumBlkInRCUnit
+  startpump.getBits(4);  // CompressionRatio
+  uint32 width    = startpump.getBits(16);
+  uint32 height    = startpump.getBits(16);
+  startpump.getBits(16); // TileWidth
+  startpump.getBits(4);  // reserved
 
   // The format includes an optimization code that sets 3 flags to change the
   // decoding parameters
-  uint32 optflags = startpump.getBitsSafe(4);
+  uint32 optflags = startpump.getBits(4);
   #define OPT_SKIP 1 // Skip checking if we need differences from previous line
   #define OPT_MV   2 // Simplify motion vector definition
   #define OPT_QP   4 // Don't scale the diff values
 
-  startpump.getBitsSafe(8);  // OverlapWidth
-  startpump.getBitsSafe(8);  // reserved
-  startpump.getBitsSafe(8);  // Inc
-  startpump.getBitsSafe(2);  // reserved
-  uint32 initVal = startpump.getBitsSafe(14);
+  startpump.getBits(8);  // OverlapWidth
+  startpump.getBits(8);  // reserved
+  startpump.getBits(8);  // Inc
+  startpump.getBits(2);  // reserved
+  uint32 initVal = startpump.getBits(14);
 
   mRaw->dim = iPoint2D(width, height);
   mRaw->createData();
@@ -335,15 +341,15 @@ void SrwDecoder::decodeCompressed3(const TiffIFD* raw, int bits)
     for (uint32 col=0; col < width; col += 16) {
       if (!(optflags & OPT_QP) && !(col & 63)) {
         int32 scalevals[] = {0,-2,2};
-        uint32 i = pump.getBitsSafe(2);
-        scale = i < 3 ? scale+scalevals[i] : pump.getBitsSafe(12);
+        uint32 i = pump.getBits(2);
+        scale = i < 3 ? scale+scalevals[i] : pump.getBits(12);
       }
 
       // First we figure out which reference pixels mode we're in
       if (optflags & OPT_MV)
-        motion = pump.getBitsSafe(1) ? 3 : 7;
-      else if (!pump.getBitsSafe(1))
-        motion = pump.getBitsSafe(3);
+        motion = pump.getBits(1) ? 3 : 7;
+      else if (!pump.getBits(1))
+        motion = pump.getBits(3);
       if ((row==0 || row==1) && (motion != 7))
         ThrowRDE("At start of image and motion isn't 7. File corrupted?");
       if (motion == 7) {
@@ -380,10 +386,10 @@ void SrwDecoder::decodeCompressed3(const TiffIFD* raw, int bits)
 
       // Figure out how many difference bits we have to read for each pixel
       uint32 diffBits[4] = {0};
-      if (optflags & OPT_SKIP || !pump.getBitsSafe(1)) {
+      if (optflags & OPT_SKIP || !pump.getBits(1)) {
         uint32 flags[4];
         for (unsigned int &flag : flags)
-          flag = pump.getBitsSafe(2);
+          flag = pump.getBits(2);
         for (uint32 i=0; i<4; i++) {
           // The color is 0-Green 1-Blue 2-Red
           uint32 colornum = (row % 2 != 0) ? i>>1 : ((i>>1)+2) % 3;
@@ -391,7 +397,7 @@ void SrwDecoder::decodeCompressed3(const TiffIFD* raw, int bits)
             case 0: diffBits[i] = diffBitsMode[colornum][0]; break;
             case 1: diffBits[i] = diffBitsMode[colornum][0]+1; break;
             case 2: diffBits[i] = diffBitsMode[colornum][0]-1; break;
-            case 3: diffBits[i] = pump.getBitsSafe(4); break;
+            case 3: diffBits[i] = pump.getBits(4); break;
           }
           diffBitsMode[colornum][0] = diffBitsMode[colornum][1];
           diffBitsMode[colornum][1] = diffBits[i];
@@ -403,7 +409,7 @@ void SrwDecoder::decodeCompressed3(const TiffIFD* raw, int bits)
       // Actually read the differences and write them to the pixels
       for (uint32 i=0; i<16; i++) {
         uint32 len = diffBits[i>>2];
-        int32 diff = pump.getBitsSafe(len);
+        int32 diff = pump.getBits(len);
 
         // If the first bit is 1 we need to turn this into a negative number
         if (len != 0 && diff >> (len - 1))
@@ -417,7 +423,7 @@ void SrwDecoder::decodeCompressed3(const TiffIFD* raw, int bits)
           value = &img[((i&0x7)<<1)+(i>>3)];
 
         diff = diff * (scale*2+1) + scale;
-        *value = clampBits((int64)(*value) + diff, bits);
+        *value = clampBits((int)*value + diff, bits);
       }
 
       img += 16;

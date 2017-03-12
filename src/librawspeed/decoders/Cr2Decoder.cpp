@@ -232,25 +232,20 @@ int Cr2Decoder::getHue() {
   return (mRaw->metadata.subsampling.y * mRaw->metadata.subsampling.x);
 }
 
-template <int version>
-static inline void YUV_TO_RGB(int Y, int Cb, int Cr, const int* sraw_coeffs,
-                              ushort16* X, int offset);
-
 /* sRaw interpolators - ugly as sin, but does the job in reasonably speed */
 
 // Note: Thread safe.
 
 template <int version>
-static inline void interpolate_422(const int* sraw_coeffs, RawImage& mRaw,
-                                   int hue, int hue_last, int w, int h,
-                                   int start_h, int end_h) {
+inline void Cr2Decoder::interpolate_422(const int* sraw_coeffs, RawImage& mRaw,
+                                        int hue, int hue_last, int w, int h) {
   // Last pixel should not be interpolated
   w--;
 
   // Current line
   ushort16* c_line;
 
-  for (int y = start_h; y < end_h; y++) {
+  for (int y = 0; y < h; y++) {
     c_line = (ushort16*)mRaw->getData(0, y);
     int off = 0;
     for (int x = 0; x < w; x++) {
@@ -279,18 +274,14 @@ static inline void interpolate_422(const int* sraw_coeffs, RawImage& mRaw,
 
 // Note: Not thread safe, since it writes inplace.
 template <int version>
-static inline void interpolate_420(const int* sraw_coeffs, RawImage& mRaw,
-                                   int hue, int w, int h, int start_h,
-                                   int end_h) {
+inline void Cr2Decoder::interpolate_420(const int* sraw_coeffs, RawImage& mRaw,
+                                        int hue, int w, int h) {
   // Last pixel should not be interpolated
   w--;
 
-  bool atLastLine = false;
+  const int end_h = h - 1;
 
-  if (end_h == h) {
-    end_h--;
-    atLastLine = true;
-  }
+  static constexpr const bool atLastLine = true;
 
   // Current line
   ushort16* c_line;
@@ -301,7 +292,7 @@ static inline void interpolate_420(const int* sraw_coeffs, RawImage& mRaw,
 
   int off;
 
-  for (int y = start_h; y < end_h; y++) {
+  for (int y = 0; y < end_h; y++) {
     c_line = (ushort16*)mRaw->getData(0, y * 2);
     n_line = (ushort16*)mRaw->getData(0, y * 2 + 1);
     nn_line = (ushort16*)mRaw->getData(0, y * 2 + 2);
@@ -353,7 +344,7 @@ static inline void interpolate_420(const int* sraw_coeffs, RawImage& mRaw,
     off = 0;
 
     // Last line
-    for (int x = 0; x < w; x++) {
+    for (int x = 0; x < w + 1; x++) {
       int Y = c_line[off];
       int Cb = c_line[off+1] - hue;
       int Cr = c_line[off+2] - hue;
@@ -374,28 +365,30 @@ static inline void interpolate_420(const int* sraw_coeffs, RawImage& mRaw,
 }
 
 template <int version>
-static void interpolate_422(int hue, RawImage& mRaw, int* sraw_coeffs, int w,
-                            int h, int start_h, int end_h) {
+void Cr2Decoder::interpolate_422(int hue, RawImage& mRaw, int* sraw_coeffs,
+                                 int w, int h) {
   hue = -hue + 16384;
-  interpolate_422<version>(sraw_coeffs, mRaw, hue, hue, w, h, start_h, end_h);
+  interpolate_422<version>(sraw_coeffs, mRaw, hue, hue, w, h);
 }
 
 template <int version>
-static void interpolate_420(int hue, RawImage& mRaw, int* sraw_coeffs, int w,
-                            int h, int start_h, int end_h) {
+void Cr2Decoder::interpolate_420(int hue, RawImage& mRaw, int* sraw_coeffs,
+                                 int w, int h) {
   hue = -hue + 16384;
-  interpolate_420<version>(sraw_coeffs, mRaw, hue, w, h, start_h, end_h);
+  interpolate_420<version>(sraw_coeffs, mRaw, hue, w, h);
 }
 
-static inline void STORE_RGB(ushort16* X, int r, int g, int b, int offset) {
+inline void Cr2Decoder::STORE_RGB(ushort16* X, int r, int g, int b,
+                                  int offset) {
   X[offset + 0] = clampBits(r >> 8, 16);
   X[offset + 1] = clampBits(g >> 8, 16);
   X[offset + 2] = clampBits(b >> 8, 16);
 }
 
 template </* int version */>
-inline void YUV_TO_RGB<1>(int Y, int Cb, int Cr, const int* sraw_coeffs,
-                          ushort16* X, int offset) {
+inline void Cr2Decoder::YUV_TO_RGB<1>(int Y, int Cb, int Cr,
+                                      const int* sraw_coeffs, ushort16* X,
+                                      int offset) {
   int r, g, b;
   r = sraw_coeffs[0] * (Y + ((50 * Cb + 22929 * Cr) >> 12));
   g = sraw_coeffs[1] * (Y + ((-5640 * Cb - 11751 * Cr) >> 12));
@@ -405,8 +398,9 @@ inline void YUV_TO_RGB<1>(int Y, int Cb, int Cr, const int* sraw_coeffs,
 
 template </* int version */>
 /* Algorithm found in EOS 40D */
-inline void YUV_TO_RGB<0>(int Y, int Cb, int Cr, const int* sraw_coeffs,
-                          ushort16* X, int offset) {
+inline void Cr2Decoder::YUV_TO_RGB<0>(int Y, int Cb, int Cr,
+                                      const int* sraw_coeffs, ushort16* X,
+                                      int offset) {
   int r, g, b;
   r = sraw_coeffs[0] * (Y + Cr - 512);
   g = sraw_coeffs[1] * (Y + ((-778 * Cb - (Cr * 2048)) >> 12) - 512);
@@ -415,17 +409,18 @@ inline void YUV_TO_RGB<0>(int Y, int Cb, int Cr, const int* sraw_coeffs,
 }
 
 template </* int version */>
-void interpolate_422<0>(int hue, RawImage& mRaw, int* sraw_coeffs, int w, int h,
-                        int start_h, int end_h) {
+void Cr2Decoder::interpolate_422<0>(int hue, RawImage& mRaw, int* sraw_coeffs,
+                                    int w, int h) {
   hue = -hue + 16384;
   auto hue_last = 16384;
-  interpolate_422<0>(sraw_coeffs, mRaw, hue, hue_last, w, h, start_h, end_h);
+  interpolate_422<0>(sraw_coeffs, mRaw, hue, hue_last, w, h);
 }
 
 template </* int version */>
 /* Algorithm found in EOS 5d Mk III */
-inline void YUV_TO_RGB<2>(int Y, int Cb, int Cr, const int* sraw_coeffs,
-                          ushort16* X, int offset) {
+inline void Cr2Decoder::YUV_TO_RGB<2>(int Y, int Cb, int Cr,
+                                      const int* sraw_coeffs, ushort16* X,
+                                      int offset) {
   int r, g, b;
   r = sraw_coeffs[0] * (Y + Cr);
   g = sraw_coeffs[1] * (Y + ((-778 * Cb - (Cr * 2048)) >> 12));
@@ -463,16 +458,19 @@ void Cr2Decoder::sRawInterpolate() {
 
   if (subSampling.y == 1 && subSampling.x == 2) {
     if (isOldSraw)
-      interpolate_422<0>(getHue(), mRaw, sraw_coeffs, width, height, 0, height);
-    else if (isNewSraw)
-      interpolate_422<2>(getHue(), mRaw, sraw_coeffs, width, height, 0, height);
-    else
-      interpolate_422<1>(getHue(), mRaw, sraw_coeffs, width, height, 0, height);
+      interpolate_422<0>(getHue(), mRaw, sraw_coeffs, width, height);
+    else {
+      if (isNewSraw) {
+        interpolate_422<2>(getHue(), mRaw, sraw_coeffs, width, height);
+      } else {
+        interpolate_422<1>(getHue(), mRaw, sraw_coeffs, width, height);
+      }
+    }
   } else if (subSampling.y == 2 && subSampling.x == 2) {
     if (isNewSraw)
-      interpolate_420<2>(getHue(), mRaw, sraw_coeffs, width, height, 0, height);
+      interpolate_420<2>(getHue(), mRaw, sraw_coeffs, width, height);
     else
-      interpolate_420<1>(getHue(), mRaw, sraw_coeffs, width, height, 0, height);
+      interpolate_420<1>(getHue(), mRaw, sraw_coeffs, width, height);
   } else
     ThrowRDE("Unknown subsampling: (%i; %i)", subSampling.x, subSampling.y);
 }

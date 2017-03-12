@@ -22,8 +22,9 @@
 #include "decoders/DcrDecoder.h"
 #include "common/Common.h"                // for uint32, uchar8, ushort16
 #include "common/Point.h"                 // for iPoint2D
-#include "decoders/RawDecoderException.h" // for ThrowRDE
-#include "decompressors/HuffmanTable.h"   // for HuffmanTable::signExtend
+#include "decoders/RawDecoderException.h" // for RawDecoderException (ptr o...
+#include "decompressors/HuffmanTable.h"   // for HuffmanTable
+#include "io/Buffer.h"                    // for Buffer
 #include "io/ByteStream.h"                // for ByteStream
 #include "io/IOException.h"               // for IOException
 #include "tiff/TiffEntry.h"               // for TiffEntry, TiffDataType::T...
@@ -61,7 +62,8 @@ RawImage DcrDecoder::decodeRawInternal() {
     TiffEntry *ifdoffset = mRootIFD->getEntryRecursive(KODAK_IFD);
     if (!ifdoffset)
       ThrowRDE("Couldn't find the Kodak IFD offset");
-    TiffRootIFD kodakifd(ifdoffset->getRootIfdData(), ifdoffset->getU32());
+    TiffRootIFD kodakifd(nullptr, ifdoffset->getRootIfdData(),
+                         ifdoffset->getU32());
     TiffEntry *linearization = kodakifd.getEntryRecursive(KODAK_LINEARIZATION);
     if (!linearization || linearization->count != 1024 || linearization->type != TIFF_SHORT) {
       ThrowRDE("Couldn't find the linearization table");

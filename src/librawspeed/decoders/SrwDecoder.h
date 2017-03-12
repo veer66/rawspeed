@@ -20,43 +20,42 @@
 
 #pragma once
 
-#include "common/Common.h"                // for uchar8, int32
+#include "common/Common.h"                // for int32
 #include "common/RawImage.h"              // for RawImage
 #include "decoders/AbstractTiffDecoder.h" // for AbstractTiffDecoder
 #include "io/BitPumpMSB.h"                // for BitPumpMSB
-#include "io/FileMap.h"                   // for FileMap
 #include "tiff/TiffIFD.h"                 // for TiffIFD (ptr only), TiffRo...
 #include <algorithm>                      // for move
 #include <string>                         // for string
+#include <vector>                         // for vector
 
 namespace RawSpeed {
 
 class CameraMetaData;
+class Buffer;
 
 class SrwDecoder final : public AbstractTiffDecoder
 {
 public:
   // please revert _this_ commit, once IWYU can handle inheriting constructors
   // using AbstractTiffDecoder::AbstractTiffDecoder;
-  SrwDecoder(TiffRootIFDOwner&& root, FileMap* file)
-    : AbstractTiffDecoder(move(root), file) {}
+  SrwDecoder(TiffRootIFDOwner&& root, Buffer* file)
+      : AbstractTiffDecoder(move(root), file) {}
 
   RawImage decodeRawInternal() override;
   void decodeMetaDataInternal(const CameraMetaData* meta) override;
   void checkSupportInternal(const CameraMetaData* meta) override;
 
 private:
-  struct encTableItem {
-    uchar8 encLen;
-    uchar8 diffLen;
-  };
+  struct encTableItem;
 
   int getDecoderVersion() const override { return 3; }
   void decodeCompressed(const TiffIFD* raw);
   void decodeCompressed2(const TiffIFD* raw, int bits);
-  int32 samsungDiff (BitPumpMSB &pump, encTableItem *tbl);
   void decodeCompressed3(const TiffIFD* raw, int bits);
   std::string getMode();
+  static int32 samsungDiff(BitPumpMSB& pump,
+                           const std::vector<encTableItem>& tbl);
 };
 
 } // namespace RawSpeed

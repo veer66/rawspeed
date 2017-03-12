@@ -22,9 +22,10 @@
 #include "decoders/OrfDecoder.h"
 #include "common/Common.h"                          // for uint32, ushort16
 #include "common/Point.h"                           // for iPoint2D
-#include "decoders/RawDecoderException.h"           // for ThrowRDE
+#include "decoders/RawDecoderException.h"           // for RawDecoderExcept...
 #include "decompressors/UncompressedDecompressor.h" // for UncompressedDeco...
 #include "io/BitPumpMSB.h"                          // for BitPumpMSB
+#include "io/Buffer.h"                              // for Buffer
 #include "io/ByteStream.h"                          // for ByteStream
 #include "io/IOException.h"                         // for IOException
 #include "metadata/Camera.h"                        // for Hints
@@ -55,10 +56,11 @@ RawImage OrfDecoder::decodeRawInternal() {
   TiffEntry *offsets = raw->getEntry(STRIPOFFSETS);
   TiffEntry *counts = raw->getEntry(STRIPBYTECOUNTS);
 
-  if (counts->count != offsets->count)
+  if (counts->count != offsets->count) {
     ThrowRDE(
         "Byte count number does not match strip size: count:%u, strips:%u ",
         counts->count, offsets->count);
+  }
 
   //TODO: this code assumes that all strips are layed out directly after another without padding and in order
   uint32 off = raw->getEntry(STRIPOFFSETS)->getU32();
@@ -105,7 +107,7 @@ void OrfDecoder::decodeUncompressed(ByteStream& s, uint32 w, uint32 h, uint32 si
   } else if (size >= w*h*3/2) { // We're in one of those weird interlaced packed raws
     u.decode12BitRawBEInterlaced(w, h);
   } else {
-    ThrowRDE("Don't know how to handle the encoding in this file\n");
+    ThrowRDE("Don't know how to handle the encoding in this file");
   }
 }
 
@@ -145,7 +147,6 @@ void OrfDecoder::decodeCompressed(ByteStream& s, uint32 w, uint32 h) {
     bool y_border = y < 2;
     bool border = true;
     for (uint32 x = 0; x < w; x++) {
-      bits.checkPos();
       bits.fill();
       i = 2 * (acarry0[2] < 3);
       for (nbits = 2 + i; (ushort16) acarry0[0] >> (nbits + i); nbits++);
@@ -171,11 +172,13 @@ void OrfDecoder::decodeCompressed(ByteStream& s, uint32 w, uint32 h) {
       if (border) {
         if (y_border && x < 2)
           pred = 0;
-        else if (y_border)
-          pred = left0;
         else {
-          pred = dest[-pitch+((int)x)];
-          nw0 = pred;
+          if (y_border)
+            pred = left0;
+          else {
+            pred = dest[-pitch + ((int)x)];
+            nw0 = pred;
+          }
         }
         dest[x] = pred + ((diff * 4) | low);
         // Set predictor
@@ -228,11 +231,13 @@ void OrfDecoder::decodeCompressed(ByteStream& s, uint32 w, uint32 h) {
       if (border) {
         if (y_border && x < 2)
           pred = 0;
-        else if (y_border)
-          pred = left1;
         else {
-          pred = dest[-pitch+((int)x)];
-          nw1 = pred;
+          if (y_border)
+            pred = left1;
+          else {
+            pred = dest[-pitch + ((int)x)];
+            nw1 = pred;
+          }
         }
         dest[x] = left1 = pred + ((diff * 4) | low);
       } else {
@@ -277,8 +282,9 @@ void OrfDecoder::decodeMetaDataInternal(const CameraMetaData* meta) {
     if(mRootIFD->hasEntryRecursive(OLYMPUSIMAGEPROCESSING)) {
       TiffEntry *img_entry = mRootIFD->getEntryRecursive(OLYMPUSIMAGEPROCESSING);
       try {
-        // get makernote ifd with containing FileMap
-        TiffRootIFD image_processing(img_entry->getRootIfdData(), img_entry->getU32());
+        // get makernote ifd with containing Buffer
+        TiffRootIFD image_processing(nullptr, img_entry->getRootIfdData(),
+                                     img_entry->getU32());
 
         // Get the WB
         if(image_processing.hasEntry((TiffTag) 0x0100)) {
@@ -296,14 +302,23 @@ void OrfDecoder::decodeMetaDataInternal(const CameraMetaData* meta) {
           // Order is assumed to be RGGB
           if (blackEntry->count == 4) {
             for (int i = 0; i < 4; i++) {
-              if (mRaw->cfa.getColorAt(i&1, i>>1) == CFA_RED)
-                mRaw->blackLevelSeparate[i] = blackEntry->getU16(0);
-              else if (mRaw->cfa.getColorAt(i&1, i>>1) == CFA_BLUE)
-                mRaw->blackLevelSeparate[i] = blackEntry->getU16(3);
-              else if (mRaw->cfa.getColorAt(i&1, i>>1) == CFA_GREEN && i<2)
-                mRaw->blackLevelSeparate[i] = blackEntry->getU16(1);
-              else if (mRaw->cfa.getColorAt(i&1, i>>1) == CFA_GREEN)
-                mRaw->blackLevelSeparate[i] = blackEntry->getU16(2);
+              auto c = mRaw->cfa.getColorAt(i & 1, i >> 1);
+              int j;
+              switch (c) {
+              case CFA_RED:
+                j = 0;
+                break;
+              case CFA_GREEN:
+                j = i < 2 ? 1 : 2;
+                break;
+              case CFA_BLUE:
+                j = 3;
+                break;
+              default:
+                ThrowRDE("Unexpected CFA color: %u", c);
+              }
+
+              mRaw->blackLevelSeparate[i] = blackEntry->getU16(j);
             }
             // Adjust whitelevel based on the read black (we assume the dynamic range is the same)
             mRaw->whitePoint -= (mRaw->blackLevel - mRaw->blackLevelSeparate[0]);

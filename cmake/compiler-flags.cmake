@@ -14,9 +14,6 @@ message(STATUS "Checking for -std=c++11 support - works")
 add_definitions(-g3)
 add_definitions(-ggdb3)
 
-# should be fixed IMHO
-CHECK_CXX_COMPILER_FLAG_AND_ENABLE_IT(-fno-strict-aliasing)
-
 # assertions
 if(CMAKE_BUILD_TYPE MATCHES "^[Re][Ee][Ll][Ee][Aa][Ss][Ee]$")
   add_definitions(-DNDEBUG)
@@ -56,40 +53,30 @@ MARK_AS_ADVANCED(
     CMAKE_SHARED_LINKER_FLAGS_COVERAGE
     CMAKE_SHARED_MODULE_FLAGS_COVERAGE )
 
-set(SANITIZATION_BASE "-fno-omit-frame-pointer -fno-optimize-sibling-calls -fno-common -U_FORTIFY_SOURCE")
-set(SANITIZATION_DEFAULTS "${SANITIZATION_BASE} -O1 -fstack-protector-strong")
+# -fstack-protector-all
+set(SANITIZATION_DEFAULTS "-O1 -fno-optimize-sibling-calls")
 
-set(asan "${SANITIZATION_DEFAULTS} -fsanitize=address")
+set(asan "-fsanitize=address -fno-omit-frame-pointer -fno-common -U_FORTIFY_SOURCE")
 if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
   set(asan "${asan} -fsanitize-address-use-after-scope")
 endif()
-SET(CMAKE_CXX_FLAGS_ASAN
-    "${asan}"
-    CACHE STRING "Flags used by the C++ compiler during ASAN builds."
-    FORCE )
-SET(CMAKE_C_FLAGS_ASAN
-    "${asan}"
-    CACHE STRING "Flags used by the C compiler during ASAN builds."
-    FORCE )
-MARK_AS_ADVANCED(
-    CMAKE_CXX_FLAGS_ASAN
-    CMAKE_C_FLAGS_ASAN )
 
-set(ubsan "${SANITIZATION_DEFAULTS} -fsanitize=undefined -fno-sanitize-recover=undefined")
+set(ubsan "-fsanitize=undefined -fno-sanitize-recover=undefined")
 if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
   set(ubsan "${ubsan} -fsanitize=integer -fno-sanitize-recover=integer")
 endif()
-SET(CMAKE_CXX_FLAGS_UBSAN
-    "${ubsan}"
-    CACHE STRING "Flags used by the C++ compiler during UBSAN builds."
+
+SET(CMAKE_CXX_FLAGS_SANITIZE
+    "${SANITIZATION_DEFAULTS} ${asan} ${ubsan}"
+    CACHE STRING "Flags used by the C++ compiler during sanitized (ASAN+UBSAN) builds."
     FORCE )
-SET(CMAKE_C_FLAGS_UBSAN
-    "${ubsan}"
-    CACHE STRING "Flags used by the C compiler during UBSAN builds."
+SET(CMAKE_C_FLAGS_SANITIZE
+    "${SANITIZATION_DEFAULTS} ${asan} ${ubsan}"
+    CACHE STRING "Flags used by the C compiler during sanitized (ASAN+UBSAN) builds."
     FORCE )
 MARK_AS_ADVANCED(
-    CMAKE_CXX_FLAGS_UBSAN
-    CMAKE_C_FLAGS_UBSAN )
+    CMAKE_CXX_FLAGS_SANITIZE
+    CMAKE_C_FLAGS_SANITIZE )
 
 set(CMAKE_C_FLAGS_RELWITHDEBINFO "${CMAKE_C_FLAGS_RELWITHDEBINFO} -O2")
 set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "${CMAKE_CXX_FLAGS_RELWITHDEBINFO} -O2")

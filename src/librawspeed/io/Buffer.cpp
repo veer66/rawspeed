@@ -23,17 +23,42 @@
 #include "common/Common.h"  // for uint64, uchar8, alignedMalloc, _aligne...
 #include "common/Memory.h"  // for alignedMalloc, alignedFree
 #include "io/IOException.h" // for IOException, ThrowIOE
+#include <memory>           // for unique_ptr
+
+using std::unique_ptr;
 
 namespace RawSpeed {
 
-Buffer::Buffer(size_type size_) : size(size_) {
+unique_ptr<uchar8, decltype(&alignedFree)> Buffer::Create(size_type size) {
   if (!size)
     ThrowIOE("Trying to allocate 0 bytes sized buffer.");
-  data = (uchar8*)alignedMalloc<16>(roundUp(size + FILEMAP_MARGIN, 16));
-  if (!data)
+
+  unique_ptr<uchar8, decltype(&alignedFree)> data(
+      (uchar8*)alignedMalloc<16>(roundUp(size + BUFFER_PADDING, 16)),
+      alignedFree);
+  if (!data.get())
     ThrowIOE("Failed to allocate %uz bytes memory buffer.", size);
+
+  return data;
+}
+
+Buffer::Buffer(unique_ptr<uchar8, decltype(&alignedFree)> data_,
+               size_type size_)
+    : size(size_) {
+  if (!size)
+    ThrowIOE("Buffer has zero size?");
+
+  if (data_.get_deleter() != alignedFree)
+    ThrowIOE("Wrong deleter. Expected RawSpeed::alignedFree()");
+
+  data = data_.release();
+  if (!data)
+    ThrowIOE("Memory buffer is nonexistant");
+
   isOwner = true;
 }
+
+Buffer::Buffer(size_type size_) : Buffer(Create(size_), size_) {}
 
 Buffer::~Buffer() {
   if (isOwner) {
@@ -71,20 +96,5 @@ void Buffer::corrupt(int errors) {
   }
 }
 #endif
-
-const uchar8* Buffer::getData(size_type offset, size_type count) const
-{
-  if (count == 0)
-    ThrowIOE("Trying to get a pointer to zero sized buffer?!");
-
-  uint64 totaloffset = (uint64)offset + (uint64)count - 1;
-  uint64 totalsize = (uint64)size + FILEMAP_MARGIN;
-
-  // Give out data up to FILEMAP_MARGIN more bytes than are really in the
-  // file as that is useful for some of the BitPump code
-  if (!isValid(offset) || totaloffset >= totalsize)
-    ThrowIOE("Attempting to read file out of bounds.");
-  return &data[offset];
-}
 
 } // namespace RawSpeed

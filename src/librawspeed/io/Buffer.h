@@ -21,16 +21,27 @@
 
 #pragma once
 
-#include "common/Common.h" // for uchar8, uint32, uint64
-#include "io/Endianness.h" // for getByteSwapped
-#include <algorithm>       // for swap
+#include "common/Common.h"  // for uchar8, uint32, uint64
+#include "common/Memory.h"  // for alignedFree
+#include "io/Endianness.h"  // for getByteSwapped
+#include "io/IOException.h" // for ThrowIOE
+#include <algorithm>        // for swap
+#include <memory>           // for unique_ptr
 
 namespace RawSpeed {
 
-// All file maps have this much space extra at the end. This is useful for
-// BitPump* that needs to have a bit of extra space at the end to be able to
-// do more efficient reads without crashing
-#define FILEMAP_MARGIN 16UL
+// This allows to specify the nuber of bytes that each Buffer needs to
+// allocate additionally to be able to remove one runtime bounds check
+// in BitStream::fill. There are two sane choices:
+// 0 : allocate exactly as much data as required, or
+// set it to the value of  BitStreamCacheBase::MaxProcessBytes
+#define BUFFER_PADDING 0UL
+
+// if the padding is >= 4, bounds checking in BitStream::fill are not compiled,
+// which supposedly saves about 1% on modern CPUs
+// WARNING: if the padding is >= 4, do *NOT* create Buffer from
+// passed unowning pointer and size. Or, subtract BUFFER_PADDING from size.
+// else bound checks will malfunction => bad things can happen !!!
 
 /*************************************************************************
  * This is the buffer abstaction.
@@ -46,13 +57,25 @@ class Buffer
 public:
   using size_type = uint32;
 
+  // allocates the databuffer, and returns owning non-const pointer.
+  static std::unique_ptr<uchar8, decltype(&alignedFree)> Create(size_type size);
+
   // constructs an empty buffer
   Buffer() = default;
+  // creates buffer from owning unique_ptr
+  Buffer(std::unique_ptr<uchar8, decltype(&alignedFree)> data_,
+         size_type size_);
+
   // Allocates the memory
   Buffer(size_type size);
+
   // Data already allocated
-  explicit Buffer(const uchar8 *data_, size_type size_)
-      : data(data_), size(size_) {}
+  explicit Buffer(const uchar8* data_, size_type size_)
+      : data(data_), size(size_) {
+    static_assert(BUFFER_PADDING == 0, "please do make sure that you do NOT "
+                                       "call this function from YOUR code, and "
+                                       "then comment-out this assert.");
+  }
   // creates a (non-owning) copy / view of rhs
   Buffer(const Buffer& rhs)
     : data(rhs.data), size(rhs.size) {}
@@ -67,12 +90,20 @@ public:
     return Buffer(getData(offset, size_), size_);
   }
   Buffer getSubView(size_type offset) const {
+    if (!isValid(0, offset))
+      ThrowIOE("Buffer overflow: image file may be truncated");
+
     size_type newSize = size - offset;
     return Buffer(getData(offset, newSize), newSize);
   }
 
   // get pointer to memory at 'offset', make sure at least 'count' bytes are accessable
-  const uchar8* getData(size_type offset, size_type count) const;
+  const uchar8* getData(size_type offset, size_type count) const {
+    if (!isValid(offset, count))
+      ThrowIOE("Buffer overflow: image file may be truncated");
+
+    return &data[offset];
+  }
 
   // convenience getter for single bytes
   uchar8 operator[](size_type offset) const {
@@ -96,23 +127,14 @@ public:
     return size;
   }
 
-  inline bool isValid(size_type offset) const {
-    return offset < size;
-  }
-
-  inline bool isValid(size_type offset, size_type count) const {
-    return (uint64)offset + count - 1 < size;
+  inline bool isValid(size_type offset, size_type count = 1) const {
+    return (uint64)offset + count < (uint64)size + BUFFER_PADDING + 1;
   }
 
 //  Buffer* clone();
 //  /* For testing purposes */
 //  void corrupt(int errors);
 //  Buffer* cloneRandomSize();
-
-  // deprecated:
-  inline uchar8* getDataWrt(size_type offset, size_type count) {
-    return const_cast<uchar8*>(getData(offset, count));
-  }
 
 protected:
   const uchar8* data = nullptr;

@@ -37,10 +37,11 @@ namespace RawSpeed {
 class DataBuffer;
 
 // order see TiffDataType
-static const uint32 datashifts[] = {0,0,0,1,2,3,0,0,1,2, 3, 2, 3, 2};
+const uint32 TiffEntry::datashifts[] = {0, 0, 0, 1, 2, 3, 0,
+                                        0, 1, 2, 3, 2, 3, 2};
 //                                  0-1-2-3-4-5-6-7-8-9-10-11-12-13
 
-TiffEntry::TiffEntry(ByteStream &bs) {
+TiffEntry::TiffEntry(TiffIFD* parent_, ByteStream& bs) : parent(parent_) {
   tag = (TiffTag)bs.getU16();
   const ushort16 numType = bs.getU16();
   if (numType > TIFF_OFFSET)
@@ -80,9 +81,10 @@ TiffEntry::TiffEntry(ByteStream &bs) {
   }
 }
 
-TiffEntry::TiffEntry(TiffTag tag_, TiffDataType type_, uint32 count_,
-                     ByteStream &&data_)
-    : data(std::move(data_)), tag(tag_), type(type_), count(count_) {
+TiffEntry::TiffEntry(TiffIFD* parent_, TiffTag tag_, TiffDataType type_,
+                     uint32 count_, ByteStream&& data_)
+    : parent(parent_), data(std::move(data_)), tag(tag_), type(type_),
+      count(count_) {
   // check for count << datashift overflow
   if (count > UINT32_MAX >> datashifts[type])
     ThrowTPE("integer overflow in size calculation.");
@@ -133,10 +135,13 @@ short16 TiffEntry::getI16(uint32 index) const {
 uint32 TiffEntry::getU32(uint32 index) const {
   if (type == TIFF_SHORT)
     return getU16(index);
-  if (!(type == TIFF_LONG || type == TIFF_OFFSET || type == TIFF_BYTE || type == TIFF_UNDEFINED || type == TIFF_RATIONAL || type == TIFF_SRATIONAL))
+  if (!(type == TIFF_LONG || type == TIFF_OFFSET || type == TIFF_BYTE ||
+        type == TIFF_UNDEFINED || type == TIFF_RATIONAL ||
+        type == TIFF_SRATIONAL)) {
     ThrowTPE("Wrong type %u encountered. Expected Long, Offset, Rational or "
              "Undefined on 0x%x",
              type, tag);
+  }
 
   return data.peek<uint32>(index);
 }
@@ -152,10 +157,11 @@ int32 TiffEntry::getI32(uint32 index) const {
 }
 
 float TiffEntry::getFloat(uint32 index) const {
-  if (!isFloat())
+  if (!isFloat()) {
     ThrowTPE("Wrong type 0x%x encountered. Expected Float or something "
              "convertible on 0x%x",
              type, tag);
+  }
 
   switch (type) {
   case TIFF_DOUBLE: return data.peek<double>(index);

@@ -85,9 +85,9 @@ const Camera* CameraMetaData::getCamera(const string& make,
                                         const string& model) const {
   auto id = getId(make, model, "");
 
-  auto iter = find_if(cameras.begin(), cameras.end(),
-                      [id](decltype(*cameras.begin())& i) -> bool {
-                        const auto cid = i.first;
+  auto iter = find_if(cameras.cbegin(), cameras.cend(),
+                      [&id](decltype(*cameras.cbegin())& i) -> bool {
+                        const auto& cid = i.first;
                         return tie(id.make, id.model) ==
                                tie(cid.make, cid.model);
                       });
@@ -118,7 +118,10 @@ bool CameraMetaData::addCamera( Camera* cam )
 {
   auto id = getId(cam->make, cam->model, cam->mode);
   if (cameras.end() != cameras.find(id)) {
-    writeLog(DEBUG_PRIO_WARNING, "CameraMetaData: Duplicate entry found for camera: %s %s, Skipping!\n", cam->make.c_str(), cam->model.c_str());
+    writeLog(
+        DEBUG_PRIO_WARNING,
+        "CameraMetaData: Duplicate entry found for camera: %s %s, Skipping!",
+        cam->make.c_str(), cam->model.c_str());
     delete cam;
     return false;
   }
@@ -127,10 +130,13 @@ bool CameraMetaData::addCamera( Camera* cam )
   if (string::npos != cam->mode.find("chdk")) {
     auto filesize_hint = cam->hints.get("filesize", string());
     if (filesize_hint.empty()) {
-      writeLog(DEBUG_PRIO_WARNING, "CameraMetaData: CHDK camera: %s %s, no \"filesize\" hint set!\n", cam->make.c_str(), cam->model.c_str());
+      writeLog(DEBUG_PRIO_WARNING,
+               "CameraMetaData: CHDK camera: %s %s, no \"filesize\" hint set!",
+               cam->make.c_str(), cam->model.c_str());
     } else {
       chdkCameras[stoi(filesize_hint)] = cam;
-      // writeLog(DEBUG_PRIO_WARNING, "CHDK camera: %s %s size:%u\n", cam->make.c_str(), cam->model.c_str(), size);
+      // writeLog(DEBUG_PRIO_WARNING, "CHDK camera: %s %s size:%u",
+      // cam->make.c_str(), cam->model.c_str(), size);
     }
   }
   return true;

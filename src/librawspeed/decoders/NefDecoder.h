@@ -23,7 +23,7 @@
 #include "common/Common.h"                // for uint32, ushort16
 #include "common/RawImage.h"              // for RawImage
 #include "decoders/AbstractTiffDecoder.h" // for AbstractTiffDecoder
-#include "io/FileMap.h"                   // for FileMap
+#include "decoders/RawDecoder.h"          // for RawDecoder::RawSlice
 #include "tiff/TiffIFD.h"                 // for TiffIFD (ptr only), TiffRo...
 #include <algorithm>                      // for move
 #include <string>                         // for string
@@ -31,22 +31,24 @@
 namespace RawSpeed {
 
 class ByteStream;
-
 class CameraMetaData;
-
 class iPoint2D;
+class Buffer;
 
 class NefDecoder final : public AbstractTiffDecoder
 {
 public:
   // please revert _this_ commit, once IWYU can handle inheriting constructors
   // using AbstractTiffDecoder::AbstractTiffDecoder;
-  NefDecoder(TiffRootIFDOwner&& root, FileMap* file)
-    : AbstractTiffDecoder(move(root), file) {}
+  NefDecoder(TiffRootIFDOwner&& root, Buffer* file)
+      : AbstractTiffDecoder(move(root), file) {}
 
   RawImage decodeRawInternal() override;
   void decodeMetaDataInternal(const CameraMetaData* meta) override;
   void checkSupportInternal(const CameraMetaData* meta) override;
+
+protected:
+  struct NefSlice final : public RawSlice {};
 
 private:
   int getDecoderVersion() const override { return 5; }
@@ -62,14 +64,6 @@ private:
   std::string getMode();
   std::string getExtendedMode(const std::string &mode);
   ushort16* gammaCurve(double pwr, double ts, int mode, int imax);
-};
-
-class NefSlice {
-public:
-  NefSlice() { h = offset = count = 0; }
-  uint32 h;
-  uint32 offset;
-  uint32 count;
 };
 
 } // namespace RawSpeed

@@ -46,20 +46,25 @@ void LJpegDecompressor::decode(uint32 offsetX, uint32 offsetY, bool fixDng16Bug_
 void LJpegDecompressor::decodeScan()
 {
   if (predictorMode != 1)
-    ThrowRDE("Unsupported predictor mode");
+    ThrowRDE("Unsupported predictor mode: %u", predictorMode);
 
   for (uint32 i = 0; i < frame.cps;  i++)
     if (frame.compInfo[i].superH != 1 || frame.compInfo[i].superV != 1)
       ThrowRDE("Unsupported subsampling");
 
-  if (frame.cps == 2)
+  switch (frame.cps) {
+  case 2:
     decodeN<2>();
-  else if (frame.cps == 3)
+    break;
+  case 3:
     decodeN<3>();
-  else if (frame.cps == 4)
+    break;
+  case 4:
     decodeN<4>();
-  else
-    ThrowRDE("Unsupported number of components");
+    break;
+  default:
+    ThrowRDE("Unsupported number of components: %u", frame.cps);
+  }
 }
 
 // N_COMP == number of components (2, 3 or 4)

@@ -1,38 +1,39 @@
 /*
-RawSpeed - RAW file decoder.
+    RawSpeed - RAW file decoder.
 
-Copyright (C) 2009-2014 Klaus Post
+    Copyright (C) 2009-2014 Klaus Post
 
-This library is free software; you can redistribute it and/or
-modify it under the terms of the GNU Lesser General Public
-License as published by the Free Software Foundation; either
-version 2 of the License, or (at your option) any later version.
+    This library is free software; you can redistribute it and/or
+    modify it under the terms of the GNU Lesser General Public
+    License as published by the Free Software Foundation; either
+    version 2 of the License, or (at your option) any later version.
 
-This library is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-Lesser General Public License for more details.
+    This library is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+    Lesser General Public License for more details.
 
-You should have received a copy of the GNU Lesser General Public
-License along with this library; if not, write to the Free Software
-Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
+    You should have received a copy of the GNU Lesser General Public
+    License along with this library; if not, write to the Free Software
+    Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
 */
 
 #include "decoders/X3fDecoder.h"
 #include "common/Common.h"                // for ushort16, uint32, uchar8
 #include "common/Memory.h"                // for alignedFree, alignedMalloc...
 #include "common/Point.h"                 // for iPoint2D, iRectangle2D
-#include "decoders/RawDecoderException.h" // for ThrowRDE
-#include "decompressors/HuffmanTable.h"   // for HuffmanTable::signExtend
+#include "decoders/RawDecoderException.h" // for RawDecoderException (ptr o...
+#include "decompressors/HuffmanTable.h"   // for HuffmanTable
 #include "io/Buffer.h"                    // for Buffer::size_type
 #include "io/ByteStream.h"                // for ByteStream
 #include "io/Endianness.h"                // for getHostEndianness, Endiann...
-#include "parsers/TiffParser.h"           // for parseTiff
+#include "parsers/TiffParser.h"           // for TiffParser::parse
 #include "tiff/TiffEntry.h"               // IWYU pragma: keep
 #include "tiff/TiffIFD.h"                 // for TiffID, TiffRootIFD, TiffR...
 #include <algorithm>                      // for max
-#include <cstdlib>                        // for atoi
+#include <cassert>                        // for assert
 #include <cstring>                        // for memset
+#include <istream>                        // for basic_istream::operator>>
 #include <map>                            // for map, _Rb_tree_iterator
 #include <memory>                         // for unique_ptr
 #include <string>                         // for string
@@ -43,13 +44,13 @@ using namespace std;
 
 namespace RawSpeed {
 
-X3fDecoder::X3fDecoder(FileMap *file) : RawDecoder(file) {
+X3fDecoder::X3fDecoder(Buffer* file) : RawDecoder(file) {
   bytes = new ByteStream(file, 0, getHostEndianness() == little);
 }
 
 X3fDecoder::~X3fDecoder() {
-  if (bytes)
-    delete bytes;
+  delete bytes;
+
   if (huge_table)
     alignedFree(huge_table);
   if (line_offsets)
@@ -84,8 +85,10 @@ void X3fDecoder::decodeMetaDataInternal(const CameraMetaData* meta) {
   if (readName()) {
     if (checkCameraSupported(meta, camera_make, camera_model, "" )) {
       int iso = 0;
-      if (hasProp("ISO"))
-        iso = atoi(getProp("ISO").c_str());
+      if (hasProp("ISO")) {
+        std::istringstream iss(getProp("ISO"));
+        iss >> iso;
+      }
       setMetaData(meta, camera_make, camera_model, "", iso);
       return;
     }
@@ -122,7 +125,8 @@ bool X3fDecoder::readName() {
       i.skipBytes(6);
       if (i.getU32() == 0x66697845) { // Match text 'Exif'
         try {
-          TiffRootIFDOwner root = parseTiff(mFile->getSubView(cimg.dataOffset+12, i.getRemainSize()));
+          TiffRootIFDOwner root = TiffParser::parse(
+              mFile->getSubView(cimg.dataOffset + 12, i.getRemainSize()));
           auto id = root->getID();
           camera_model = id.model;
           camera_make = id.make;
@@ -230,10 +234,10 @@ void X3fDecoder::decompressSigma( X3fImage &image )
             // Interpolate 1 missing pixel
             int blue_mid = ((int)blue[0] + (int)blue[3] + (int)blue_down[0] + (int)blue_down[3] + 2)>>2;
             int avg = dst[0];
-            dst[0] = clampBits(((int64)blue[0] - blue_mid) + avg, 16);
-            dst[3] = clampBits(((int64)blue[3] - blue_mid) + avg, 16);
-            dst_down[0] = clampBits(((int64)blue_down[0] - blue_mid) + avg, 16);
-            dst_down[3] = clampBits(((int64)blue_down[3] - blue_mid) + avg, 16);
+            dst[0] = clampBits(((int)blue[0] - blue_mid) + avg, 16);
+            dst[3] = clampBits(((int)blue[3] - blue_mid) + avg, 16);
+            dst_down[0] = clampBits(((int)blue_down[0] - blue_mid) + avg, 16);
+            dst_down[3] = clampBits(((int)blue_down[3] - blue_mid) + avg, 16);
             dst += 6;
             blue += 6;
             blue_down += 6;
@@ -460,13 +464,12 @@ int X3fDecoder::SigmaDecode(BitPumpMSB *bits) {
   return v;
 }
 
-FileMap* X3fDecoder::getCompressedData()
-{
+Buffer* X3fDecoder::getCompressedData() {
   auto img = mImages.begin();
   for (; img !=  mImages.end(); ++img) {
     X3fImage cimg = *img;
     if (cimg.type == 1 || cimg.type == 3) {
-      return new FileMap(mFile->getSubView(cimg.dataOffset, cimg.dataSize));
+      return new Buffer(mFile->getSubView(cimg.dataOffset, cimg.dataSize));
     }
   }
   return nullptr;

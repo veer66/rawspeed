@@ -74,13 +74,13 @@ static string name(const xml_node &a) {
   return string(a.name());
 }
 
-static const map<char, CFAColor> char2enum = {
+const map<char, CFAColor> Camera::char2enum = {
     {'g', CFA_GREEN},      {'r', CFA_RED},  {'b', CFA_BLUE},
     {'f', CFA_FUJI_GREEN}, {'c', CFA_CYAN}, {'m', CFA_MAGENTA},
     {'y', CFA_YELLOW},
 };
 
-static const map<string, CFAColor> str2enum = {
+const map<string, CFAColor> Camera::str2enum = {
     {"GREEN", CFA_GREEN},   {"RED", CFA_RED},
     {"BLUE", CFA_BLUE},     {"FUJI_GREEN", CFA_FUJI_GREEN},
     {"CYAN", CFA_CYAN},     {"MAGENTA", CFA_MAGENTA},
@@ -236,19 +236,16 @@ void Camera::parseID(const xml_node &cur) {
   if (name(cur) != "ID")
     ThrowCME("Not an ID node!");
 
-  string id_make = cur.attribute("make").as_string();
-  if (id_make.empty())
+  canonical_make = cur.attribute("make").as_string();
+  if (canonical_make.empty())
     ThrowCME("Could not find make for ID for %s %s camera.", make.c_str(),
              model.c_str());
 
-  string id_model = cur.attribute("model").as_string();
-  if (id_model.empty())
+  canonical_alias = canonical_model = cur.attribute("model").as_string();
+  if (canonical_model.empty())
     ThrowCME("Could not find model for ID for %s %s camera.", make.c_str(),
              model.c_str());
 
-  canonical_make = id_make;
-  canonical_model = id_model;
-  canonical_alias = id_model;
   canonical_id = cur.child_value();
 }
 

@@ -38,8 +38,8 @@
 #include "decoders/Rw2Decoder.h"         // for Rw2Decoder
 #include "decoders/SrwDecoder.h"         // for SrwDecoder
 #include "decoders/ThreefrDecoder.h"     // for ThreefrDecoder
+#include "io/Buffer.h"                   // for Buffer
 #include "io/ByteStream.h"               // for ByteStream
-#include "io/FileMap.h"                  // for FileMap
 #include "parsers/TiffParserException.h" // for TiffParserException
 #include "tiff/TiffEntry.h"              // for TiffEntry
 #include "tiff/TiffTag.h"                // for TiffTag::DNGVERSION, TiffTa...
@@ -57,7 +57,7 @@ namespace RawSpeed {
 
 class RawDecoder;
 
-TiffRootIFDOwner parseTiff(const Buffer &data) {
+TiffRootIFDOwner TiffParser::parse(const Buffer& data) {
   ByteStream bs(data, 0);
   bs.setInNativeByteOrder(isTiffInNativeByteOrder(bs, 0, "TIFF header"));
   bs.skipBytes(2);
@@ -66,16 +66,18 @@ TiffRootIFDOwner parseTiff(const Buffer &data) {
   if (magic != 42 && magic != 0x4f52 && magic != 0x5352 && magic != 0x55) // ORF has 0x4f52/0x5352, RW2 0x55 - Brillant!
     ThrowTPE("Not a TIFF file (magic 42)");
 
-  TiffRootIFDOwner root = make_unique<TiffRootIFD>(bs, UINT32_MAX); // tell TiffIFD constructur not to parse bs as IFD
+  TiffRootIFDOwner root = make_unique<TiffRootIFD>(
+      nullptr, bs,
+      UINT32_MAX); // tell TiffIFD constructur not to parse bs as IFD
   for( uint32 nextIFD = bs.getU32(); nextIFD; nextIFD = root->getSubIFDs().back()->getNextIFD() ) {
-    root->add(make_unique<TiffIFD>(bs, nextIFD, root.get()));
+    root->add(make_unique<TiffIFD>(root.get(), bs, nextIFD));
   }
 
   return root;
 }
 
-RawDecoder* makeDecoder(TiffRootIFDOwner root, Buffer &data) {
-  FileMap* mInput = &data;
+RawDecoder* TiffParser::makeDecoder(TiffRootIFDOwner root, Buffer& data) {
+  Buffer* mInput = &data;
   if (!root)
     ThrowTPE("TiffIFD is null.");
 

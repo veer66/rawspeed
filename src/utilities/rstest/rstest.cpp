@@ -1,4 +1,6 @@
 /*
+    RawSpeed - RAW file decoder.
+
     Copyright (C) 2017 Axel Waggershauser
 
     This library is free software; you can redistribute it and/or
@@ -40,13 +42,13 @@
 #endif
 
 // define this function, it is only declared in rawspeed:
-int rawspeed_get_number_of_processor_cores() {
 #ifdef _OPENMP
-  return omp_get_num_procs();
+int rawspeed_get_number_of_processor_cores() { return omp_get_num_procs(); }
 #else
+int __attribute__((const)) rawspeed_get_number_of_processor_cores() {
   return 1;
-#endif
 }
+#endif
 
 using namespace std;
 using namespace RawSpeed;
@@ -71,7 +73,7 @@ struct Timer {
 
 string img_hash(RawImage &r) {
   ostringstream oss;
-  char line[256];
+  char line[1024];
 
 #define APPEND(...)                                                            \
   do {                                                                         \
@@ -197,8 +199,8 @@ size_t process(const string& filename, const CameraMetaData* metadata,
 
   FileReader reader(filename.c_str());
 
-  unique_ptr<FileMap> map = unique_ptr<FileMap>(reader.readFile());
-  // FileMap* map = readFile( argv[1] );
+  unique_ptr<Buffer> map = unique_ptr<Buffer>(reader.readFile());
+  // Buffer* map = readFile( argv[1] );
 
   Timer t;
 

@@ -22,6 +22,7 @@
 
 #include "common/Common.h" // for uint32, uchar8
 #include "io/BitStream.h"  // for BitStream, BitStreamCacheLeftInRightOut
+#include "io/Buffer.h"     // for Buffer::size_type
 #include "io/Endianness.h" // for getLE
 
 namespace RawSpeed {
@@ -33,14 +34,17 @@ struct PlainBitPumpTag;
 
 using BitPumpPlain = BitStream<PlainBitPumpTag, BitStreamCacheLeftInRightOut>;
 
-template<> inline void BitPumpPlain::fillCache() {
-  static_assert(BitStreamCacheBase::MaxGetBits >= 32, "if the structure of the bit cache changed, this code has to be updated");
+template <>
+inline BitPumpPlain::size_type BitPumpPlain::fillCache(const uchar8* input)
+{
+  static_assert(BitStreamCacheBase::MaxGetBits >= 32, "check implementation");
 
-  cache.push(getLE<uint32>(data + pos), 32);
-  pos += 4;
+  cache.push(getLE<uint32>(input), 32);
+  return 4;
 }
 
-template<> inline void BitPumpPlain::setBufferPosition(uint32 newPos) {
+template <> inline void BitPumpPlain::setBufferPosition(size_type newPos)
+{
   pos = newPos;
   cache.fillLevel = 0;
   cache.cache = 0;

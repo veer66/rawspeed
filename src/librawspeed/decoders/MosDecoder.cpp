@@ -23,17 +23,18 @@
 #include "common/Common.h"                          // for uint32, uchar8
 #include "common/Point.h"                           // for iPoint2D
 #include "decoders/RawDecoder.h"                    // for RawDecoder
-#include "decoders/RawDecoderException.h"           // for ThrowRDE
+#include "decoders/RawDecoderException.h"           // for RawDecoderExcept...
 #include "decompressors/UncompressedDecompressor.h" // for UncompressedDeco...
 #include "io/BitPumpMSB32.h"                        // for BitPumpMSB32
+#include "io/Buffer.h"                              // for Buffer
 #include "io/ByteStream.h"                          // for ByteStream
 #include "io/Endianness.h"                          // for getU32LE, getLE
 #include "tiff/TiffEntry.h"                         // for TiffEntry
 #include "tiff/TiffIFD.h"                           // for TiffRootIFD, Tif...
 #include "tiff/TiffTag.h"                           // for TiffTag::TILEOFF...
 #include <algorithm>                                // for move
-#include <cstdio>                                   // for sscanf
 #include <cstring>                                  // for memchr
+#include <istream>                                  // for istringstream
 #include <memory>                                   // for unique_ptr
 #include <string>                                   // for string, allocator
 
@@ -43,9 +44,8 @@ namespace RawSpeed {
 
 class CameraMetaData;
 
-MosDecoder::MosDecoder(TiffRootIFDOwner&& rootIFD, FileMap* file)
-  : AbstractTiffDecoder(move(rootIFD), file)
-{
+MosDecoder::MosDecoder(TiffRootIFDOwner&& rootIFD, Buffer* file)
+    : AbstractTiffDecoder(move(rootIFD), file) {
   black_level = 0;
 
   if (mRootIFD->getEntryRecursive(MAKE)) {
@@ -177,18 +177,18 @@ void MosDecoder::DecodePhaseOneC(uint32 data_offset, uint32 strip_offset, uint32
       else if ((col & 7) == 0) {
         for (unsigned int &i : len) {
           int32 j = 0;
-          for (; j < 5 && !pump.getBitsSafe(1); j++);
+          for (; j < 5 && !pump.getBits(1); j++);
           if (j--)
-            i = length[j * 2 + pump.getBitsSafe(1)];
+            i = length[j * 2 + pump.getBits(1)];
         }
       }
 
       int i = len[col & 1];
       if (i == 14)
-        img[col] = pred[col & 1] = pump.getBitsSafe(16);
+        img[col] = pred[col & 1] = pump.getBits(16);
       else
         img[col] = pred[col & 1] +=
-            (signed)pump.getBitsSafe(i) + 1 - (1 << (i - 1));
+            (signed)pump.getBits(i) + 1 - (1 << (i - 1));
     }
   }
 }
@@ -216,8 +216,10 @@ void MosDecoder::decodeMetaDataInternal(const CameraMetaData* meta) {
         if (!memchr(bs.peekData(bs.getRemainSize()), 0, bs.getRemainSize()))
           break;
         uint32 tmp[4] = {0};
-        sscanf(bs.peekString(), "%u %u %u %u", &tmp[0], &tmp[1], &tmp[2], &tmp[3]);
-        if (tmp[0] > 0 && tmp[1] > 0 && tmp[2] > 0 && tmp[3] > 0) {
+        std::istringstream iss(bs.peekString());
+        iss >> tmp[0] >> tmp[1] >> tmp[2] >> tmp[3];
+        if (!iss.fail() && tmp[0] > 0 && tmp[1] > 0 && tmp[2] > 0 &&
+            tmp[3] > 0) {
           mRaw->metadata.wbCoeffs[0] = (float) tmp[0]/tmp[1];
           mRaw->metadata.wbCoeffs[1] = (float) tmp[0]/tmp[2];
           mRaw->metadata.wbCoeffs[2] = (float) tmp[0]/tmp[3];

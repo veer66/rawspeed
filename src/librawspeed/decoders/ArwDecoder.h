@@ -25,7 +25,6 @@
 #include "common/RawImage.h"              // for RawImage
 #include "decoders/AbstractTiffDecoder.h" // for AbstractTiffDecoder
 #include "io/ByteStream.h"                // for ByteStream
-#include "io/FileMap.h"                   // for FileMap
 #include "tiff/TiffIFD.h"                 // for TiffIFD (ptr only), TiffRo...
 #include <algorithm>                      // for move
 
@@ -35,13 +34,15 @@ class CameraMetaData;
 
 class RawDecoderThread;
 
+class Buffer;
+
 class ArwDecoder final : public AbstractTiffDecoder
 {
 public:
   // please revert _this_ commit, once IWYU can handle inheriting constructors
   // using AbstractTiffDecoder::AbstractTiffDecoder;
-  ArwDecoder(TiffRootIFDOwner&& root, FileMap* file)
-    : AbstractTiffDecoder(move(root), file) {}
+  ArwDecoder(TiffRootIFDOwner&& root, Buffer* file)
+      : AbstractTiffDecoder(move(root), file) {}
 
   RawImage decodeRawInternal() override;
   void decodeMetaDataInternal(const CameraMetaData* meta) override;
@@ -52,6 +53,7 @@ protected:
   void DecodeARW(ByteStream &input, uint32 w, uint32 h);
   void DecodeARW2(ByteStream &input, uint32 w, uint32 h, uint32 bpp);
   void DecodeUncompressed(const TiffIFD* raw);
+  void SonyDecrypt(uint32* ibuf, uint32* obuf, uint32 len, uint32 key);
   void SonyDecrypt(uint32 *buffer, uint32 len, uint32 key);
   void GetWB();
   ByteStream in;

@@ -21,28 +21,29 @@
 
 #pragma once
 
-#include "io/FileMap.h" // for FileMap
+#include "parsers/RawParser.h" // for RawParser
+#include "tiff/CiffIFD.h"      // for CiffIFD
+#include <memory>              // for unique_ptr
 
 namespace RawSpeed {
 
-class CiffIFD;
+class Buffer;
 
 class RawDecoder;
 
-class CiffParser final {
+class CiffParser final : public RawParser {
 public:
-  CiffParser(FileMap* input);
-  ~CiffParser();
+  CiffParser(Buffer* input);
 
   void parseData();
   RawDecoder* getDecoder();
   /* Returns the Root IFD - this object still retains ownership */
-  CiffIFD* RootIFD() const { return mRootIFD; }
+  CiffIFD* RootIFD() const { return mRootIFD.get(); }
   /* Merges root of other CIFF into this - clears the root of the other */
   void MergeIFD(CiffParser* other_ciff);
+
 protected:
-  FileMap *mInput;
-  CiffIFD* mRootIFD;
+  std::unique_ptr<CiffIFD> mRootIFD;
 };
 
 } // namespace RawSpeed

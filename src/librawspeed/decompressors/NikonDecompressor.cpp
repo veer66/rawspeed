@@ -20,6 +20,7 @@
 
 #include "decompressors/NikonDecompressor.h"
 #include "common/Common.h"              // for uint32, ushort16, clampBits
+#include "common/Point.h"               // for iPoint2D
 #include "common/RawImage.h"            // for RawImage, RawImageData, RawI...
 #include "decompressors/HuffmanTable.h" // for HuffmanTable
 #include "io/BitPumpMSB.h"              // for BitPumpMSB, BitStream<>::fil...
@@ -31,7 +32,7 @@ using namespace std;
 
 namespace RawSpeed {
 
-static const uchar8 nikon_tree[][2][16] = {
+const uchar8 NikonDecompressor::nikon_tree[][2][16] = {
     {/* 12-bit lossy */
      {0, 1, 5, 1, 1, 1, 1, 1, 1, 2, 0, 0, 0, 0, 0, 0},
      {5, 4, 3, 6, 2, 7, 1, 0, 8, 9, 11, 10, 12}},
@@ -53,7 +54,7 @@ static const uchar8 nikon_tree[][2][16] = {
 
 };
 
-static HuffmanTable createHuffmanTable(uint32 huffSelect) {
+HuffmanTable NikonDecompressor::createHuffmanTable(uint32 huffSelect) {
   HuffmanTable ht;
   uint32 count = ht.setNCodesPerLength(Buffer(nikon_tree[huffSelect][0], 16));
   ht.setCodeValues(Buffer(nikon_tree[huffSelect][1], count));
@@ -61,7 +62,9 @@ static HuffmanTable createHuffmanTable(uint32 huffSelect) {
   return ht;
 }
 
-void decompressNikon(RawImage& mRaw, ByteStream&& data, ByteStream metadata, uint32 w, uint32 h, uint32 bitsPS, bool uncorrectedRawValues) {
+void NikonDecompressor::decompress(RawImage& mRaw, ByteStream&& data,
+                                   ByteStream metadata, const iPoint2D& size,
+                                   uint32 bitsPS, bool uncorrectedRawValues) {
   uint32 v0 = metadata.getByte();
   uint32 v1 = metadata.getByte();
   uint32 huffSelect = 0;
@@ -69,7 +72,7 @@ void decompressNikon(RawImage& mRaw, ByteStream&& data, ByteStream metadata, uin
   int pUp1[2];
   int pUp2[2];
 
-  writeLog(DEBUG_PRIO_EXTRA, "Nef version v0:%u, v1:%u\n", v0, v1);
+  writeLog(DEBUG_PRIO_EXTRA, "Nef version v0:%u, v1:%u", v0, v1);
 
   if (v0 == 73 || v1 == 88)
     metadata.skipBytes(2110);
@@ -122,11 +125,11 @@ void decompressNikon(RawImage& mRaw, ByteStream&& data, ByteStream metadata, uin
 
   int pLeft1 = 0;
   int pLeft2 = 0;
-  uint32 cw = w / 2;
+  uint32 cw = size.x / 2;
   uint32 random = bits.peekBits(24);
   //allow gcc to devirtualize the calls below
   auto *rawdata = (RawImageDataU16 *)mRaw.get();
-  for (uint32 y = 0; y < h; y++) {
+  for (uint32 y = 0; y < (unsigned)size.y; y++) {
     if (split && y == split) {
       ht = createHuffmanTable(huffSelect + 1);
     }
@@ -138,7 +141,6 @@ void decompressNikon(RawImage& mRaw, ByteStream&& data, ByteStream metadata, uin
     rawdata->setWithLookUp(clampBits(pLeft1,15), (uchar8*)dest++, &random);
     rawdata->setWithLookUp(clampBits(pLeft2,15), (uchar8*)dest++, &random);
     for (uint32 x = 1; x < cw; x++) {
-      bits.checkPos();
       pLeft1 += ht.decodeNext(bits);
       pLeft2 += ht.decodeNext(bits);
       rawdata->setWithLookUp(clampBits(pLeft1,15), (uchar8*)dest++, &random);

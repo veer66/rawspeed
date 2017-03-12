@@ -1,28 +1,29 @@
 /*
-RawSpeed - RAW file decoder.
+    RawSpeed - RAW file decoder.
 
-Copyright (C) 2009-2015 Klaus Post
+    Copyright (C) 2009-2015 Klaus Post
 
-This library is free software; you can redistribute it and/or
-modify it under the terms of the GNU Lesser General Public
-License as published by the Free Software Foundation; either
-version 2 of the License, or (at your option) any later version.
+    This library is free software; you can redistribute it and/or
+    modify it under the terms of the GNU Lesser General Public
+    License as published by the Free Software Foundation; either
+    version 2 of the License, or (at your option) any later version.
 
-This library is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-Lesser General Public License for more details.
+    This library is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+    Lesser General Public License for more details.
 
-You should have received a copy of the GNU Lesser General Public
-License along with this library; if not, write to the Free Software
-Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
+    You should have received a copy of the GNU Lesser General Public
+    License along with this library; if not, write to the Free Software
+    Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
 */
 
 #include "decoders/AriDecoder.h"
 #include "common/Common.h"                // for uint32, ushort16
 #include "common/Point.h"                 // for iPoint2D
-#include "decoders/RawDecoderException.h" // for ThrowRDE
+#include "decoders/RawDecoderException.h" // for RawDecoderException (ptr o...
 #include "io/BitPumpMSB32.h"              // for BitPumpMSB32
+#include "io/Buffer.h"                    // for Buffer
 #include "io/ByteStream.h"                // for ByteStream
 #include "io/Endianness.h"                // for getHostEndianness, Endiann...
 #include "io/IOException.h"               // for IOException
@@ -33,7 +34,7 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
 
 namespace RawSpeed {
 
-AriDecoder::AriDecoder(FileMap* file) : RawDecoder(file) {
+AriDecoder::AriDecoder(Buffer* file) : RawDecoder(file) {
   if (mFile->getSize() < 4096) {
     ThrowRDE("File too small (no header)");
   }
@@ -69,7 +70,7 @@ AriDecoder::AriDecoder(FileMap* file) : RawDecoder(file) {
   }
 }
 
-bool AriDecoder::isARI(FileMap* input) {
+bool AriDecoder::isARI(Buffer* input) {
   static const char magic[] = "ARRI\x12\x34\x56\x78";
   static const size_t magic_size = sizeof(magic) - 1; // excluding \0
   const unsigned char* data = input->getData(0, magic_size);
@@ -98,7 +99,6 @@ void AriDecoder::decodeThreaded(RawDecoderThread * t) {
       uint32 b = bits.getBits(12);
       dest[x*2] = b;
       dest[x*2+1] = a;
-      bits.checkPos();
     }
   }
 }
