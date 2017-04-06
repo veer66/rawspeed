@@ -26,9 +26,10 @@
 #include <algorithm>                      // for max, min
 #include <vector>                         // for vector
 
-using namespace std;
+using std::min;
+using std::max;
 
-namespace RawSpeed {
+namespace rawspeed {
 
 RawImageDataFloat::RawImageDataFloat() {
   bpp = 4;
@@ -130,7 +131,7 @@ RawImageDataFloat::RawImageDataFloat() {
     startWorker(RawImageWorker::SCALE_VALUES, true);
 }
 
-#if 0 // _MSC_VER > 1399 || defined(__SSE2__)
+#if 0 // (defined(_MSC_VER) && _MSC_VER > 1399) || defined(__SSE2__)
 
   void RawImageDataFloat::scaleValues(int start_y, int end_y) {
     bool use_sse2;
@@ -149,7 +150,7 @@ RawImageDataFloat::RawImageDataFloat() {
       __m128i sseround;
       __m128i ssesub2;
       __m128i ssesign;
-      uint32* sub_mul = (uint32*)alignedMallocArray(4, sizeof(__m128i));
+      auto* sub_mul = alignedMallocArray<uint32, 16, __m128i>(4);
 	  if (!sub_mul)
 		ThrowRDE("Out of memory, failed to allocate 128 bytes");
 
@@ -377,5 +378,4 @@ void RawImageDataFloat::setWithLookUp(ushort16 value, uchar8* dst, uint32* rando
   ThrowRDE("Float point lookup tables not implemented");
 }
 
-
-} // namespace RawSpeed
+} // namespace rawspeed

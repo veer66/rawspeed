@@ -24,7 +24,7 @@
 #include <memory> // for unique_ptr
 #include <vector> // for vector
 
-namespace RawSpeed {
+namespace rawspeed {
 
 class RawImage;
 
@@ -33,7 +33,7 @@ class TiffEntry;
 class DngOpcodes
 {
 public:
-  DngOpcodes(TiffEntry* entry);
+  explicit DngOpcodes(TiffEntry* entry);
   ~DngOpcodes();
   void applyOpCodes(RawImage& ri);
 
@@ -55,4 +55,4 @@ protected:
   template <typename S> class ScalePerRowOrCol;
 };
 
-} // namespace RawSpeed
+} // namespace rawspeed

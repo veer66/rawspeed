@@ -26,13 +26,14 @@
 #include "tiff/TiffIFD.h"                // for TiffIFD, TiffRootIFD
 #include "tiff/TiffTag.h"                // for ::DNGPRIVATEDATA, ::EXIFIFD...
 #include <algorithm>                     // for move
+#include <cassert>                       // for assert
 #include <cstdint>                       // for UINT32_MAX
 #include <cstring>                       // for strnlen
 #include <string>                        // for string
 
-using namespace std;
+using std::string;
 
-namespace RawSpeed {
+namespace rawspeed {
 
 class DataBuffer;
 
@@ -197,11 +198,17 @@ string TiffEntry::getString() const {
 const DataBuffer &TiffEntry::getRootIfdData() const {
   TiffIFD* p = parent;
   TiffRootIFD* r = nullptr;
-  while (p && !(r = dynamic_cast<TiffRootIFD*>(p)))
+  while (p) {
+    r = dynamic_cast<TiffRootIFD*>(p);
+    if (r)
+      break;
     p = p->parent;
+  }
   if (!r)
     ThrowTPE("Internal error in TiffIFD data structure.");
+
+  assert(r != nullptr);
   return r->rootBuffer;
 }
 
-} // namespace RawSpeed
+} // namespace rawspeed

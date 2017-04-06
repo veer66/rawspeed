@@ -22,7 +22,7 @@
 
 #include "parsers/RawParser.h" // for RawParser
 
-namespace RawSpeed {
+namespace rawspeed {
 
 class Buffer;
 
@@ -30,10 +30,10 @@ class RawDecoder;
 
 class FiffParser final : public RawParser {
 public:
-  FiffParser(Buffer* input);
+  explicit FiffParser(Buffer* input);
   virtual ~FiffParser() = default;
 
   virtual RawDecoder* getDecoder();
 };
 
-} // namespace RawSpeed
+} // namespace rawspeed

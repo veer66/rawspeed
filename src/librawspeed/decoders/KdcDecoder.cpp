@@ -25,16 +25,16 @@
 #include "decoders/RawDecoderException.h"           // for RawDecoderExcept...
 #include "decompressors/UncompressedDecompressor.h" // for UncompressedDeco...
 #include "io/Buffer.h"                              // for Buffer
+#include "io/Endianness.h"                          // for Endiannes
 #include "metadata/Camera.h"                        // for Hints
 #include "parsers/TiffParserException.h"            // for TiffParserException
 #include "tiff/TiffEntry.h"                         // for TiffEntry
 #include "tiff/TiffIFD.h"                           // for TiffRootIFD
 #include "tiff/TiffTag.h"                           // for TiffTag::COMPRES...
+#include <cassert>                                  // for assert
 #include <memory>                                   // for unique_ptr
 
-using namespace std;
-
-namespace RawSpeed {
+namespace rawspeed {
 
 RawImage KdcDecoder::decodeRawInternal() {
   if (!mRootIFD->hasEntryRecursive(COMPRESSION))
@@ -57,6 +57,8 @@ RawImage KdcDecoder::decodeRawInternal() {
   TiffEntry *offset = mRootIFD->getEntryRecursive(KODAK_KDC_OFFSET);
   if (!offset || offset->count < 13)
     ThrowRDE("Couldn't find the KDC offset");
+
+  assert(offset != nullptr);
   uint32 off = offset->getU32(4) + offset->getU32(12);
 
   // Offset hardcoding gotten from dcraw
@@ -69,9 +71,9 @@ RawImage KdcDecoder::decodeRawInternal() {
   mRaw->dim = iPoint2D(width, height);
   mRaw->createData();
 
-  UncompressedDecompressor u(*mFile, off, mRaw, uncorrectedRawValues);
+  UncompressedDecompressor u(*mFile, off, mRaw);
 
-  u.decode12BitRawBE(width, height);
+  u.decode12BitRaw<big>(width, height);
 
   return mRaw;
 }
@@ -110,4 +112,4 @@ void KdcDecoder::decodeMetaDataInternal(const CameraMetaData* meta) {
   }
 }
 
-} // namespace RawSpeed
+} // namespace rawspeed

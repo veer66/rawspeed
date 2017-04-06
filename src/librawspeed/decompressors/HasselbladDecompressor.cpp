@@ -21,12 +21,13 @@
 
 #include "decompressors/HasselbladDecompressor.h"
 #include "common/Common.h"              // for uint32, ushort16
+#include "common/RawImage.h"            // for RawImage, RawImageData
 #include "decompressors/HuffmanTable.h" // for HuffmanTable
 #include "io/BitPumpMSB32.h"            // for BitPumpMSB32, BitStream<>::f...
 #include "io/ByteStream.h"              // for ByteStream
 #include <array>                        // for array
 
-namespace RawSpeed {
+namespace rawspeed {
 
 // Returns len bits as a signed value.
 // Highest bit is a sign bit
@@ -69,4 +70,4 @@ void HasselbladDecompressor::decode(int pixelBaseOffset_)
   AbstractLJpegDecompressor::decode();
 }
 
-} // namespace RawSpeed
+} // namespace rawspeed

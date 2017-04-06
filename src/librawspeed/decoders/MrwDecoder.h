@@ -26,14 +26,14 @@
 #include "decoders/RawDecoder.h" // for RawDecoder
 #include "tiff/TiffIFD.h"        // for TiffRootIFDOwner
 
-namespace RawSpeed {
+namespace rawspeed {
 
 class CameraMetaData;
 class Buffer;
 
 class MrwDecoder final : public RawDecoder {
 public:
-  MrwDecoder(Buffer* file);
+  explicit MrwDecoder(Buffer* file);
   RawImage decodeRawInternal() override;
   void checkSupportInternal(const CameraMetaData* meta) override;
   void decodeMetaDataInternal(const CameraMetaData* meta) override;
@@ -47,4 +47,4 @@ protected:
   float wb_coeffs[4];
 };
 
-} // namespace RawSpeed
+} // namespace rawspeed

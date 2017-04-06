@@ -20,22 +20,23 @@
 
 #include "RawSpeed-API.h"
 
-#include "io/Endianness.h" // for getHostEndianness, BSWAP16, Endianness::l...
+#include "md5.h"           // for md5_hash
+#include <cassert>         // for assert
 #include <chrono>          // for milliseconds, steady_clock, duration, dur...
 #include <cstdint>         // for uint8_t
 #include <cstdio>          // for snprintf, size_t, fclose, fopen, fprintf
 #include <cstdlib>         // for system
-#include <cstring>         // for memset
 #include <fstream>         // IWYU pragma: keep
 #include <iomanip>         // for operator<<, setw
 #include <iostream>        // for cout, cerr, left, internal
 #include <map>             // for map
 #include <memory>          // for unique_ptr, allocator
 #include <sstream>         // IWYU pragma: keep
-#include <stdexcept>       // for runtime_error
 #include <string>          // for string, char_traits, operator+, operator<<
 #include <type_traits>     // for enable_if<>::type
 #include <utility>         // for pair
+#include <vector>          // for vector
+// IWYU pragma: no_include <ext/alloc_traits.h>
 
 #ifdef _OPENMP
 #include <omp.h>
@@ -50,18 +51,68 @@ int __attribute__((const)) rawspeed_get_number_of_processor_cores() {
 }
 #endif
 
-using namespace std;
-using namespace RawSpeed;
+using std::chrono::steady_clock;
+using std::string;
+using std::ostringstream;
+using std::vector;
+using std::ifstream;
+using std::istreambuf_iterator;
+using std::ofstream;
+using std::cout;
+using std::setw;
+using std::left;
+using std::endl;
+using std::unique_ptr;
+using std::internal;
+using std::map;
+using std::cerr;
+using rawspeed::CameraMetaData;
+using rawspeed::FileReader;
+using rawspeed::Buffer;
+using rawspeed::RawParser;
+using rawspeed::RawDecoder;
+using rawspeed::RawImage;
+using rawspeed::uchar8;
+using rawspeed::uint32;
+using rawspeed::iPoint2D;
+using rawspeed::TYPE_USHORT16;
+using rawspeed::TYPE_FLOAT32;
+using rawspeed::getU16BE;
+using rawspeed::getU32LE;
+using rawspeed::isAligned;
+using rawspeed::roundUp;
+using rawspeed::RawspeedException;
 
-std::string md5_hash(const uint8_t *message, size_t len);
+namespace rawspeed {
+
+namespace rstest {
+
+std::string img_hash(rawspeed::RawImage& r);
+
+void writePPM(const rawspeed::RawImage& raw, const std::string& fn);
+void writePFM(const rawspeed::RawImage& raw, const std::string& fn);
+
+void writeImage(const rawspeed::RawImage& raw, const std::string& fn);
+
+size_t process(const std::string& filename,
+               const rawspeed::CameraMetaData* metadata, bool create,
+               bool dump);
+
+class RstestHashMismatch final : public rawspeed::RawspeedException {
+public:
+  explicit RstestHashMismatch(const std::string& msg)
+      : RawspeedException(msg) {}
+  explicit RstestHashMismatch(const char* msg) : RawspeedException(msg) {}
+};
 
 struct Timer {
-  mutable chrono::steady_clock::time_point start = chrono::steady_clock::now();
+  mutable std::chrono::steady_clock::time_point start =
+      std::chrono::steady_clock::now();
   size_t operator()() const {
-    auto ms = chrono::duration_cast<chrono::milliseconds>(
-                  chrono::steady_clock::now() - start)
+    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                  std::chrono::steady_clock::now() - start)
                   .count();
-    start = chrono::steady_clock::now();
+    start = std::chrono::steady_clock::now();
     return ms;
   }
 };
@@ -114,7 +165,12 @@ string img_hash(RawImage &r) {
   APPEND("dimCropped: %dx%d\n", r->dim.x, r->dim.y);
   const iPoint2D cropTL = r->getCropOffset();
   APPEND("cropOffset: %dx%d\n", cropTL.x, cropTL.y);
-  APPEND("pitch: %d\n", r->pitch);
+
+  // NOTE: pitch is internal property, a function of dimUncropped.x, bpp and
+  // some additional padding overhead, to align each line lenght to be a
+  // multiple of (currently) 16 bytes. And maybe with some additional
+  // const offset. there is no point in showing it here, it may differ.
+  // APPEND("pitch: %d\n", r->pitch);
 
   APPEND("blackAreas: ");
   for (auto ba : r->blackAreas)
@@ -130,17 +186,24 @@ string img_hash(RawImage &r) {
 
   APPEND("\n");
 
-  // clear the bytes at the end of each line, so we get a consistent hash
-  size_t padding = r->pitch - dimUncropped.x * r->getBpp();
-  if (padding) {
-    uint8_t *d = r->getDataUncropped(0, 1) - padding;
-    for (int i = 0; i < r->getUncroppedDim().y; ++i, d += r->pitch)
-      memset(d, 0, padding);
+
+  // yes, this is not cool. but i see no way to compute the hash of the
+  // full image, without duplicating image, and copying excluding padding
+  rawspeed::md5::md5_state hash_of_line_hashes = rawspeed::md5::md5_init;
+  {
+    vector<rawspeed::md5::md5_state> line_hashes;
+    line_hashes.resize(dimUncropped.y, rawspeed::md5::md5_init);
+    for (int j = 0; j < dimUncropped.y; j++) {
+      auto* d = r->getDataUncropped(0, j);
+      rawspeed::md5::md5_hash(d, r->pitch - r->padding, line_hashes[j]);
+    }
+    rawspeed::md5::md5_hash((const uint8_t*)&line_hashes[0],
+                            sizeof(line_hashes[0]) * line_hashes.size(),
+                            hash_of_line_hashes);
   }
-  string hash =
-      md5_hash(r->getDataUncropped(0, 0),
-               static_cast<size_t>(r->pitch) * r->getUncroppedDim().y);
-  APPEND("data md5sum: %s\n", hash.c_str());
+
+  APPEND("md5sum of per-line md5sums: %s\n",
+         rawspeed::md5::hash_to_string(hash_of_line_hashes).c_str());
 
   for (const string& e : r->errors)
     APPEND("WARNING: [rawspeed] %s\n", e.c_str());
@@ -151,7 +214,7 @@ string img_hash(RawImage &r) {
 }
 
 void writePPM(const RawImage& raw, const string& fn) {
-  FILE *f = fopen(fn.c_str(), "wb");
+  FILE* f = fopen((fn + ".ppm").c_str(), "wb");
 
   int width = raw->dim.x;
   int height = raw->dim.y;
@@ -164,14 +227,65 @@ void writePPM(const RawImage& raw, const string& fn) {
 
   // Write pixels
   for (int y = 0; y < height; ++y) {
-    auto *row = reinterpret_cast<unsigned short *>(raw->getData(0, y));
+    auto* row = (unsigned short*)(raw->getData(0, y));
     // PPM is big-endian
     for (int x = 0; x < width; ++x)
       row[x] = getU16BE(row + x);
 
-    fwrite(row, 2, width, f);
+    fwrite(row, sizeof(*row), width, f);
   }
   fclose(f);
+}
+
+void writePFM(const RawImage& raw, const string& fn) {
+  FILE* f = fopen((fn + ".pfm").c_str(), "wb");
+
+  int width = raw->dim.x;
+  int height = raw->dim.y;
+  string format = raw->getCpp() == 1 ? "Pf" : "PF";
+
+  // Write PFM header. if scale < 0, it is little-endian, if >= 0 - big-endian
+  int len = fprintf(f, "%s\n%d %d\n-1.0", format.c_str(), width, height);
+
+  // make sure that data starts at aligned offset. for sse
+  static const auto dataAlignment = 16;
+  const int sseLen = roundUp(len, dataAlignment);
+  len += fprintf(f, "%0*i\n", sseLen - len - 1, 0);
+
+  // did we write a multiple of an alignment value?
+  assert(isAligned(len, dataAlignment));
+  assert(ftell(f) == len);
+  assert(isAligned(ftell(f), dataAlignment));
+
+  width *= raw->getCpp();
+
+  // Write pixels
+  for (int y = 0; y < height; ++y) {
+    // NOTE: pfm has rows in reverse order
+    const int row_in = height - 1 - y;
+    auto* row = (float*)(raw->getData(0, row_in));
+
+    // PFM can have any endiannes, let's write little-endian
+    for (int x = 0; x < width; ++x)
+      row[x] = getU32LE(row + x);
+
+    fwrite(row, sizeof(*row), width, f);
+  }
+  fclose(f);
+}
+
+void writeImage(const RawImage& raw, const string& fn) {
+  switch (raw->getDataType()) {
+  case TYPE_USHORT16:
+    writePPM(raw, fn);
+    break;
+  case TYPE_FLOAT32:
+    writePFM(raw, fn);
+    break;
+  default:
+    __builtin_unreachable();
+    break;
+  }
 }
 
 size_t process(const string& filename, const CameraMetaData* metadata,
@@ -182,7 +296,7 @@ size_t process(const string& filename, const CameraMetaData* metadata,
   // if creating hash and hash exists -> skip current file
   // if not creating and hash is missing -> skip as well
   ifstream hf(hashfile);
-  if (!(hf.good() ^ create)) {
+  if (hf.good() == create) {
 #ifdef _OPENMP
 #pragma omp critical(io)
 #endif
@@ -229,7 +343,7 @@ size_t process(const string& filename, const CameraMetaData* metadata,
     ofstream f(hashfile);
     f << img_hash(raw);
     if (dump)
-      writePPM(raw, filename + ".ppm");
+      writeImage(raw, filename);
   } else {
     string truth((istreambuf_iterator<char>(hf)), istreambuf_iterator<char>());
     string h = img_hash(raw);
@@ -237,8 +351,8 @@ size_t process(const string& filename, const CameraMetaData* metadata,
       ofstream f(filename + ".hash.failed");
       f << h;
       if (dump)
-        writePPM(raw, filename + ".failed.ppm");
-      throw std::runtime_error("hash/metadata mismatch");
+        writeImage(raw, filename + ".failed");
+      throw RstestHashMismatch("hash/metadata mismatch");
     }
   }
 
@@ -307,9 +421,17 @@ static int usage(const char* progname) {
   return 0;
 }
 
+} // namespace rstest
+
+} // namespace rawspeed
+
+using rawspeed::rstest::usage;
+using rawspeed::rstest::process;
+using rawspeed::rstest::results;
+
 int main(int argc, char **argv) {
 
-  auto hasFlag = [&](string flag) {
+  auto hasFlag = [argc, argv](string flag) {
     bool found = false;
     for (int i = 1; i < argc; ++i) {
       if (!argv[i] || argv[i] != flag)
@@ -340,7 +462,7 @@ int main(int argc, char **argv) {
 
     try {
       time += process(argv[i], &metadata, create, dump);
-    } catch (std::runtime_error &e) {
+    } catch (RawspeedException& e) {
 #ifdef _OPENMP
 #pragma omp critical(io)
 #endif

@@ -23,7 +23,7 @@
 
 #include <algorithm> // for max, min
 
-namespace RawSpeed {
+namespace rawspeed {
 
 class iPoint2D {
 public:
@@ -118,7 +118,7 @@ public:
 
   constexpr unsigned int area() const { return dim.area(); }
 
-  void offset(const iPoint2D& offset) { pos += offset; }
+  void offset(const iPoint2D& offset_) { pos += offset_; }
 
   /* Retains size */
   void setTopLeft(const iPoint2D& top_left) { pos = top_left; }
@@ -193,4 +193,4 @@ public:
   iPoint2D dim{0, 0};
 };
 
-} // namespace RawSpeed
+} // namespace rawspeed

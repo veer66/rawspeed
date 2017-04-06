@@ -25,7 +25,7 @@
 #include <string>          // for string
 #include <tuple>           // for tuple
 
-namespace RawSpeed {
+namespace rawspeed {
 
 class Camera;
 
@@ -43,7 +43,7 @@ struct CameraId {
 class CameraMetaData final {
 public:
   CameraMetaData() = default;
-  CameraMetaData(const char *docname);
+  explicit CameraMetaData(const char* docname);
   ~CameraMetaData();
   std::map<CameraId, Camera*> cameras;
   std::map<uint32,Camera*> chdkCameras;
@@ -67,4 +67,4 @@ protected:
   bool addCamera(Camera* cam);
 };
 
-} // namespace RawSpeed
+} // namespace rawspeed

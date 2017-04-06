@@ -22,6 +22,7 @@
 
 #include "parsers/TiffParser.h"
 #include "common/Common.h"               // for make_unique, trimSpaces
+#include "common/RawspeedException.h"    // for RawspeedException
 #include "decoders/ArwDecoder.h"         // for ArwDecoder
 #include "decoders/Cr2Decoder.h"         // for Cr2Decoder
 #include "decoders/DcrDecoder.h"         // for DcrDecoder
@@ -38,7 +39,6 @@
 #include "decoders/Rw2Decoder.h"         // for Rw2Decoder
 #include "decoders/SrwDecoder.h"         // for SrwDecoder
 #include "decoders/ThreefrDecoder.h"     // for ThreefrDecoder
-#include "io/Buffer.h"                   // for Buffer
 #include "io/ByteStream.h"               // for ByteStream
 #include "parsers/TiffParserException.h" // for TiffParserException
 #include "tiff/TiffEntry.h"              // for TiffEntry
@@ -46,14 +46,13 @@
 #include <algorithm>                     // for move
 #include <cstdint>                       // for UINT32_MAX
 #include <memory>                        // for unique_ptr
-#include <stdexcept>                     // for runtime_error
 #include <string>                        // for operator==, basic_string
 #include <vector>                        // for vector
 // IWYU pragma: no_include <ext/alloc_traits.h>
 
-using namespace std;
+using std::string;
 
-namespace RawSpeed {
+namespace rawspeed {
 
 class RawDecoder;
 
@@ -84,7 +83,7 @@ RawDecoder* TiffParser::makeDecoder(TiffRootIFDOwner root, Buffer& data) {
   if (root->hasEntryRecursive(DNGVERSION)) {  // We have a dng image entry
     try {
       return new DngDecoder(move(root), mInput);
-    } catch (std::runtime_error& e) {
+    } catch (RawspeedException& e) {
       //TODO: remove this exception type conversion
       ThrowTPE("%s", e.what());
     }
@@ -160,4 +159,4 @@ RawDecoder* TiffParser::makeDecoder(TiffRootIFDOwner root, Buffer& data) {
   return nullptr;
 }
 
-} // namespace RawSpeed
+} // namespace rawspeed

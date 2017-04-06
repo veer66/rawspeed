@@ -4,7 +4,7 @@ FILE(GLOB RAWSPEED_TEST_SOURCES
   "RawSpeed.cpp"
 )
 
-if(CMAKE_BUILD_TYPE MATCHES "^[Cc][Oo][Vv][Ee][Rr][Aa][Gg][Ee]$")
+if(CMAKE_BUILD_TYPE STREQUAL "COVERAGE")
   # want all the symbols.
   add_library(rawspeed_test SHARED $<TARGET_OBJECTS:rawspeed> ${RAWSPEED_TEST_SOURCES})
 else()
@@ -24,6 +24,7 @@ endif()
 
 FILE(GLOB RAWSPEED_TESTS_SOURCES
   "../common/CommonTest.cpp"
+  "../common/CpuidTest.cpp"
   "../common/MemoryTest.cpp"
   "../common/PointTest.cpp"
   "../io/EndiannessTest.cpp"
@@ -37,6 +38,7 @@ FILE(GLOB RAWSPEED_TESTS_SOURCES
 
 CHECK_CXX_COMPILER_FLAG_AND_ENABLE_IT(-Wno-suggest-attribute=const)
 CHECK_CXX_COMPILER_FLAG_AND_ENABLE_IT(-Wno-suggest-override)
+CHECK_CXX_COMPILER_FLAG_AND_ENABLE_IT(-Wno-missing-prototypes)
 
 if(NOT SPECIAL_BUILD)
   # should be < 64Kb
@@ -53,12 +55,16 @@ set(CMAKE_CXX_CLANG_TIDY_SAVE "${CMAKE_CXX_CLANG_TIDY}")
 
 unset(CMAKE_CXX_CLANG_TIDY)
 
+# FIXME: it should be PATH, but then it is escaped, and that breaks gtest
+set(UNITTEST_REPORT_PATH ${CMAKE_BINARY_DIR}/unittest-reports/ CACHE STRING "" FORCE)
+file(MAKE_DIRECTORY "${UNITTEST_REPORT_PATH}")
+
 foreach(IN ${RAWSPEED_TESTS_SOURCES})
   get_filename_component(TESTNAME ${IN} NAME_WE)
   add_executable(${TESTNAME} ${IN})
   target_link_libraries(${TESTNAME} rawspeed_test)
   # GTEST_ADD_TESTS(${TESTNAME} "" AUTO)
-  add_test(NAME ${TESTNAME} COMMAND ${TESTNAME})
+  add_test(NAME ${TESTNAME} COMMAND ${TESTNAME} --gtest_output=xml:${UNITTEST_REPORT_PATH})
   add_dependencies(tests ${TESTNAME})
 endforeach()
 

@@ -20,11 +20,12 @@
 
 #pragma once
 
-#include "io/Buffer.h"         // for Buffer
 #include "parsers/RawParser.h" // for RawParser
 #include "tiff/TiffIFD.h"      // for TiffRootIFDOwner
 
-namespace RawSpeed {
+namespace rawspeed {
+
+class Buffer;
 
 class RawDecoder;
 
@@ -32,11 +33,10 @@ class TiffParser final : public RawParser {
 public:
   // TiffRootIFDOwner contains pointers into 'data' but if is is non-owning, it
   // may be deleted immediately
-  static TiffRootIFDOwner
-  parse(const Buffer& data); // NOLINT no, it's not unneeded
+  static TiffRootIFDOwner parse(const Buffer& data);
 
   // transfers ownership of TiffIFD into RawDecoder
   static RawDecoder* makeDecoder(TiffRootIFDOwner root, Buffer& data);
 };
 
-} // namespace RawSpeed
+} // namespace rawspeed

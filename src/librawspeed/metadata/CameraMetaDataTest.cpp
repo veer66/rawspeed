@@ -27,10 +27,10 @@
 #include <memory>                    // for unique_ptr
 #include <string>                    // for string
 
-using namespace std;
-using namespace RawSpeed;
+using std::unique_ptr;
+using rawspeed::CameraMetaData;
 
-namespace RawSpeedTest {
+namespace rawspeed_test {
 
 static const std::string camfile(CMAKE_SOURCE_DIR "/data/cameras.xml");
 
@@ -80,4 +80,4 @@ TEST(CameraMetaDataTest, PrefixSearch) {
   });
 }
 
-} // namespace RawSpeedTest
+} // namespace rawspeed_test

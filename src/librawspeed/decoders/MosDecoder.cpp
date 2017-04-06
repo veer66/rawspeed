@@ -33,14 +33,15 @@
 #include "tiff/TiffIFD.h"                           // for TiffRootIFD, Tif...
 #include "tiff/TiffTag.h"                           // for TiffTag::TILEOFF...
 #include <algorithm>                                // for move
+#include <cassert>                                  // for assert
 #include <cstring>                                  // for memchr
 #include <istream>                                  // for istringstream
 #include <memory>                                   // for unique_ptr
 #include <string>                                   // for string, allocator
 
-using namespace std;
+using std::string;
 
-namespace RawSpeed {
+namespace rawspeed {
 
 class CameraMetaData;
 
@@ -56,6 +57,8 @@ MosDecoder::MosDecoder(TiffRootIFDOwner&& rootIFD, Buffer* file)
     TiffEntry *xmp = mRootIFD->getEntryRecursive(XMP);
     if (!xmp)
       ThrowRDE("Couldn't find the XMP");
+
+    assert(xmp != nullptr);
     string xmpText = xmp->getString();
     make = getXMPTag(xmpText, "Make");
     model = getXMPTag(xmpText, "Model");
@@ -102,6 +105,7 @@ RawImage MosDecoder::decodeRawInternal() {
       case 0x10f: data_offset  = data+base; break;
       case 0x21c: strip_offset = data+base; break;
       case 0x21d: black_level  = data>>2;   break;
+      default: break;
       }
     }
     if (width <= 0 || height <= 0)
@@ -139,14 +143,14 @@ RawImage MosDecoder::decodeRawInternal() {
   mRaw->dim = iPoint2D(width, height);
   mRaw->createData();
 
-  UncompressedDecompressor u(*mFile, off, mRaw, uncorrectedRawValues);
+  UncompressedDecompressor u(*mFile, off, mRaw);
 
   int compression = raw->getEntry(COMPRESSION)->getU32();
   if (1 == compression) {
     if (getTiffEndianness(mFile) == big)
-      u.decode16BitRawBEunpacked(width, height);
+      u.decodeRawUnpacked<16, big>(width, height);
     else
-      u.decode16BitRawUnpacked(width, height);
+      u.decodeRawUnpacked<16, little>(width, height);
   }
   else if (99 == compression || 7 == compression) {
     ThrowRDE("Leaf LJpeg not yet supported");
@@ -234,4 +238,4 @@ void MosDecoder::decodeMetaDataInternal(const CameraMetaData* meta) {
     mRaw->blackLevel = black_level;
 }
 
-} // namespace RawSpeed
+} // namespace rawspeed

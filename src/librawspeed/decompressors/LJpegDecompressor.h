@@ -21,11 +21,12 @@
 #pragma once
 
 #include "common/Common.h"                           // for uint32
-#include "common/RawImage.h"                         // for RawImage
 #include "decompressors/AbstractLJpegDecompressor.h" // for AbstractLJpegDe...
 #include "io/Buffer.h"                               // for Buffer, Buffer:...
 
-namespace RawSpeed {
+namespace rawspeed {
+
+class RawImage;
 
 // Decompresses Lossless JPEGs, with 2-4 components
 
@@ -47,4 +48,4 @@ public:
   void decode(uint32 offsetX, uint32 offsetY, bool fixDng16Bug);
 };
 
-} // namespace RawSpeed
+} // namespace rawspeed

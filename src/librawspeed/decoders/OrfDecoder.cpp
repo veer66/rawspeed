@@ -27,6 +27,7 @@
 #include "io/BitPumpMSB.h"                          // for BitPumpMSB
 #include "io/Buffer.h"                              // for Buffer
 #include "io/ByteStream.h"                          // for ByteStream
+#include "io/Endianness.h"                          // for Endianness
 #include "io/IOException.h"                         // for IOException
 #include "metadata/Camera.h"                        // for Hints
 #include "metadata/ColorFilterArray.h"              // for ColorFilterArray
@@ -40,9 +41,11 @@
 #include <cstring>                                  // for memset
 #include <memory>                                   // for unique_ptr
 
-using namespace std;
+using std::unique_ptr;
+using std::min;
+using std::signbit;
 
-namespace RawSpeed {
+namespace rawspeed {
 
 class CameraMetaData;
 
@@ -93,19 +96,19 @@ RawImage OrfDecoder::decodeRawInternal() {
 }
 
 void OrfDecoder::decodeUncompressed(ByteStream& s, uint32 w, uint32 h, uint32 size) {
-  UncompressedDecompressor u(s, mRaw, uncorrectedRawValues);
+  UncompressedDecompressor u(s, mRaw);
   if (hints.has("packed_with_control"))
-    u.decode12BitRawWithControl(w, h);
+    u.decode12BitRaw<little, false, true>(w, h);
   else if (hints.has("jpeg32_bitorder")) {
     iPoint2D dimensions(w, h), pos(0, 0);
     u.readUncompressedRaw(dimensions, pos, w * 12 / 8, 12, BitOrder_Jpeg32);
   } else if (size >= w*h*2) { // We're in an unpacked raw
     if (s.isInNativeByteOrder())
-      u.decode12BitRawUnpacked(w, h);
+      u.decodeRawUnpacked<12, little>(w, h);
     else
-      u.decode12BitRawBEunpackedLeftAligned(w, h);
+      u.decode12BitRawUnpackedLeftAligned<big>(w, h);
   } else if (size >= w*h*3/2) { // We're in one of those weird interlaced packed raws
-    u.decode12BitRawBEInterlaced(w, h);
+    u.decode12BitRaw<big, true>(w, h);
   } else {
     ThrowRDE("Don't know how to handle the encoding in this file");
   }
@@ -331,4 +334,4 @@ void OrfDecoder::decodeMetaDataInternal(const CameraMetaData* meta) {
   }
 }
 
-} // namespace RawSpeed
+} // namespace rawspeed

@@ -44,13 +44,17 @@ extern "C" {
 // IWYU pragma: no_include <jmorecfg.h>
 }
 
-using namespace std;
+using std::vector;
+using std::unique_ptr;
+using std::min;
 
-namespace RawSpeed {
+namespace rawspeed {
 
 #ifdef HAVE_JPEG_MEM_SRC
 
-#define JPEG_MEMSRC(A, B, C) jpeg_mem_src(A, B, C)
+// FIXME: some libjpeg versions discard const qual for the input data pointer
+// should this be a cmake check?
+#define JPEG_MEMSRC(A, B, C) jpeg_mem_src(A, const_cast<unsigned char*>(B), C)
 
 #else
 
@@ -89,13 +93,17 @@ static void jpeg_mem_src_int(j_decompress_ptr cinfo,
   src->resync_to_restart = jpeg_resync_to_restart; /* use default method */
   src->term_source = term_source;
   src->bytes_in_buffer = nbytes;
-  src->next_input_byte = (JOCTET*)buffer;
+  src->next_input_byte = (const JOCTET*)buffer;
 }
 
 #endif
 
 METHODDEF(void)
-my_error_throw(j_common_ptr cinfo) { ThrowRDE("JPEG decoder error!"); }
+my_error_throw(j_common_ptr cinfo) {
+  char buf[JMSG_LENGTH_MAX] = {0};
+  (*cinfo->err->format_message)(cinfo, buf);
+  ThrowRDE("JPEG decoder error: %s", buf);
+}
 
 struct JpegDecompressor::JpegDecompressStruct : jpeg_decompress_struct {
   struct jpeg_error_mgr jerr;
@@ -103,7 +111,7 @@ struct JpegDecompressor::JpegDecompressStruct : jpeg_decompress_struct {
     jpeg_create_decompress(this);
 
     err = jpeg_std_error(&jerr);
-    jerr.error_exit = my_error_throw;
+    jerr.error_exit = &my_error_throw;
   }
   ~JpegDecompressStruct() { jpeg_destroy_decompress(this); }
 };
@@ -114,8 +122,8 @@ void JpegDecompressor::decode(uint32 offX,
 
   vector<JSAMPROW> buffer(1);
 
-  JPEG_MEMSRC(&dinfo, (unsigned char*)input.getData(input.getRemainSize()),
-              input.getRemainSize());
+  const auto size = input.getRemainSize();
+  JPEG_MEMSRC(&dinfo, input.getData(size), size);
 
   if (JPEG_HEADER_OK != jpeg_read_header(&dinfo, static_cast<boolean>(true)))
     ThrowRDE("Unable to read JPEG header");
@@ -126,8 +134,8 @@ void JpegDecompressor::decode(uint32 offX,
   int row_stride = dinfo.output_width * dinfo.output_components;
 
   unique_ptr<uchar8[], decltype(&alignedFree)> complete_buffer(
-      (uchar8*)alignedMallocArray<16>(dinfo.output_height, row_stride),
-      alignedFree);
+      alignedMallocArray<uchar8, 16>(dinfo.output_height, row_stride),
+      &alignedFree);
   while (dinfo.output_scanline < dinfo.output_height) {
     buffer[0] = (JSAMPROW)(
         &complete_buffer[(size_t)dinfo.output_scanline * row_stride]);
@@ -149,7 +157,7 @@ void JpegDecompressor::decode(uint32 offX,
   }
 }
 
-} // namespace RawSpeed
+} // namespace rawspeed
 
 #else
 

@@ -21,21 +21,23 @@
 */
 
 #include "tiff/TiffIFD.h"
-#include "common/Common.h"  // for getHostEndianness, uint32, make_unique
-#include "io/IOException.h" // for IOException
-#include "tiff/TiffEntry.h" // for TiffEntry
-#include "tiff/TiffTag.h"   // for TiffTag, ::DNGPRIVATEDATA, ::EXIFIFDPOINTER
-#include <algorithm>        // for move
-#include <cstdint>          // for UINT32_MAX
-#include <map>              // for map, _Rb_tree_const_iterator, allocator
-#include <memory>           // for default_delete, unique_ptr
-#include <string>           // for operator==, string, basic_string
-#include <utility>          // for pair
-#include <vector>           // for vector
+#include "common/Common.h" // for getHostEndianness, uint32, make_unique
+#include "common/RawspeedException.h" // for RawspeedException
+#include "io/IOException.h"           // for IOException
+#include "tiff/TiffEntry.h"           // for TiffEntry
+#include "tiff/TiffTag.h" // for TiffTag, ::DNGPRIVATEDATA, ::EXIFIFDPOINTER
+#include <algorithm>      // for move
+#include <cstdint>        // for UINT32_MAX
+#include <map>            // for map, _Rb_tree_const_iterator, allocator
+#include <memory>         // for default_delete, unique_ptr
+#include <string>         // for operator==, string, basic_string
+#include <utility>        // for pair
+#include <vector>         // for vector
 
-using namespace std;
+using std::string;
+using std::vector;
 
-namespace RawSpeed {
+namespace rawspeed {
 
 void TiffIFD::parseIFDEntry(ByteStream& bs) {
   TiffEntryOwner t;
@@ -75,7 +77,7 @@ void TiffIFD::parseIFDEntry(ByteStream& bs) {
     default:
       add(move(t));
     }
-  } catch (...) { // Unparsable private data are added as entries
+  } catch (RawspeedException&) { // Unparsable private data are added as entries
     add(move(t));
   }
 }
@@ -90,7 +92,7 @@ TiffIFD::TiffIFD(TiffIFD* parent_, const DataBuffer& data, uint32 offset)
 
   checkOverflow();
 
-  ByteStream bs = data;
+  ByteStream bs(data);
   bs.setPosition(offset);
 
   auto numEntries = bs.getU16(); // Directory entries in this IFD
@@ -284,4 +286,4 @@ TiffID TiffRootIFD::getID() const
   return id;
 }
 
-} // namespace RawSpeed
+} // namespace rawspeed

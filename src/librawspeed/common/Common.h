@@ -23,17 +23,17 @@
 #include "rawspeedconfig.h"
 
 #include <algorithm>        // for forward
+#include <cassert>          // for assert
+#include <cstdint>          // for uintptr_t
 #include <cstring>          // for memcpy, size_t
 #include <initializer_list> // for initializer_list
 #include <memory>           // for unique_ptr, allocator
 #include <string>           // for string
 #include <vector>           // for vector
-#include <cassert>          // for assert
 
 int rawspeed_get_number_of_processor_cores();
 
-
-namespace RawSpeed {
+namespace rawspeed {
 
 using char8 = signed char;
 using uchar8 = unsigned char;
@@ -80,6 +80,12 @@ roundUp(size_t value, size_t multiple) {
              : value + multiple - (value % multiple);
 }
 
+template <typename T>
+constexpr inline __attribute__((const)) bool isAligned(T value,
+                                                       size_t multiple) {
+  return (multiple == 0) || ((uintptr_t)value % multiple == 0);
+}
+
 template <typename T, typename T2>
 bool __attribute__((pure))
 isIn(const T value, const std::initializer_list<T2>& list) {
@@ -107,13 +113,6 @@ inline uint32 getThreadCount()
   return rawspeed_get_number_of_processor_cores();
 #endif
 }
-
-#ifdef _MSC_VER
-// See http://tinyurl.com/hqfuznc
-#if _MSC_VER >= 1900
-extern "C" { FILE __iob_func[3] = { *stdin,*stdout,*stderr }; }
-#endif
-#endif
 
 // clampBits clamps the given int to the range 0 .. 2^n-1, with n <= 16
 inline ushort16 __attribute__((const)) clampBits(int x, uint32 n) {
@@ -186,7 +185,10 @@ struct unroll_loop_t {
 
 template <typename Lambda>
 struct unroll_loop_t<Lambda, 0> {
-  inline static void repeat(const Lambda& f) {}
+  inline static void repeat(const Lambda& f) {
+    // this method is correctly empty.
+    // only needed as part of compile time 'manual' branch unrolling
+  }
 };
 
 template <size_t N, typename Lambda>
@@ -194,4 +196,4 @@ inline void unroll_loop(const Lambda& f) {
   unroll_loop_t<Lambda, N>::repeat(f);
 }
 
-} // namespace RawSpeed
+} // namespace rawspeed

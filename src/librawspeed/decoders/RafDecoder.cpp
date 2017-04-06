@@ -35,15 +35,14 @@
 #include "tiff/TiffEntry.h"                         // for TiffEntry
 #include "tiff/TiffIFD.h"                           // for TiffRootIFD, Tif...
 #include "tiff/TiffTag.h"                           // for TiffTag::FUJIOLDWB
+#include <cassert>                                  // for assert
 #include <cstdio>                                   // for size_t
 #include <cstring>                                  // for memcmp
 #include <memory>                                   // for unique_ptr, allo...
 #include <string>                                   // for string
 #include <vector>                                   // for vector
 
-using namespace std;
-
-namespace RawSpeed {
+namespace rawspeed {
 
 bool RafDecoder::isRAF(Buffer* input) {
   static const char magic[] = "FUJIFILMCCD-RAW ";
@@ -92,19 +91,19 @@ RawImage RafDecoder::decodeRawInternal() {
 
   mRaw->dim = iPoint2D(width*(double_width ? 2 : 1), height);
   mRaw->createData();
-  ByteStream input = offsets->getRootIfdData();
+  ByteStream input(offsets->getRootIfdData());
   input.setPosition(offsets->getU32());
 
-  UncompressedDecompressor u(input, mRaw, uncorrectedRawValues);
+  UncompressedDecompressor u(input, mRaw);
 
   iPoint2D pos(0, 0);
 
   if (counts->getU32()*8/(width*height) < 10) {
     ThrowRDE("Don't know how to decode compressed images");
   } else if (double_width) {
-    u.decode16BitRawUnpacked(width * 2, height);
+    u.decodeRawUnpacked<16, little>(width * 2, height);
   } else if (input.isInNativeByteOrder() == (getHostEndianness() == big)) {
-    u.decode16BitRawBEunpacked(width, height);
+    u.decodeRawUnpacked<16, big>(width, height);
   } else {
     if (hints.has("jpeg32_bitorder")) {
       u.readUncompressedRaw(mRaw->dim, pos, width * bps / 8, bps,
@@ -136,8 +135,11 @@ void RafDecoder::decodeMetaDataInternal(const CameraMetaData* meta) {
   if (!cam)
     ThrowRDE("Couldn't find camera");
 
+  assert(cam != nullptr);
+
   iPoint2D new_size(mRaw->dim);
   iPoint2D crop_offset = iPoint2D(0,0);
+
   if (applyCrop) {
     new_size = cam->cropSize;
     crop_offset = cam->cropPos;
@@ -147,13 +149,12 @@ void RafDecoder::decodeMetaDataInternal(const CameraMetaData* meta) {
       new_size.x = mRaw->dim.x / (double_width ? 2 : 1) - cam->cropPos.x + new_size.x;
     else
       new_size.x /= (double_width ? 2 : 1);
-
     if (new_size.y <= 0)
       new_size.y = mRaw->dim.y - cam->cropPos.y + new_size.y;
   }
 
   bool rotate = hints.has("fuji_rotate");
-  rotate = rotate & fujiRotate;
+  rotate = rotate && fujiRotate;
 
   // Rotate 45 degrees - could be multithreaded.
   if (rotate && !this->uncorrectedRawValues) {
@@ -252,5 +253,4 @@ void RafDecoder::decodeMetaDataInternal(const CameraMetaData* meta) {
   }
 }
 
-
-} // namespace RawSpeed
+} // namespace rawspeed

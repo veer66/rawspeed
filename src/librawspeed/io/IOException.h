@@ -24,14 +24,18 @@
 #include "common/RawspeedException.h" // for RawspeedException
 #include <string>                     // for string
 
-namespace RawSpeed {
+namespace rawspeed {
 
 class IOException final : public RawspeedException {
 public:
-  IOException(const std::string& msg) : RawspeedException(msg) {}
-  IOException(const char* msg) : RawspeedException(msg) {}
+  explicit IOException(const std::string& msg) : RawspeedException(msg) {}
+  explicit IOException(const char* msg) : RawspeedException(msg) {}
 };
 
-#define ThrowIOE(...) ThrowExceptionHelper(IOException, __VA_ARGS__)
+#define ThrowIOE(...)                                                          \
+  do {                                                                         \
+    ThrowExceptionHelper(rawspeed::IOException, __VA_ARGS__);                  \
+    __builtin_unreachable();                                                   \
+  } while (false)
 
-} // namespace RawSpeed
+} // namespace rawspeed

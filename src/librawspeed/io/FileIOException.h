@@ -25,14 +25,18 @@
 #include "decoders/RawDecoderException.h" // for RawDecoderException
 #include <string>                         // for string
 
-namespace RawSpeed {
+namespace rawspeed {
 
 class FileIOException final : public RawDecoderException {
 public:
-  FileIOException(const std::string& msg) : RawDecoderException(msg) {}
-  FileIOException(const char* msg) : RawDecoderException(msg) {}
+  explicit FileIOException(const std::string& msg) : RawDecoderException(msg) {}
+  explicit FileIOException(const char* msg) : RawDecoderException(msg) {}
 };
 
-#define ThrowFIE(...) ThrowExceptionHelper(FileIOException, __VA_ARGS__)
+#define ThrowFIE(...)                                                          \
+  do {                                                                         \
+    ThrowExceptionHelper(rawspeed::FileIOException, __VA_ARGS__);              \
+    __builtin_unreachable();                                                   \
+  } while (false)
 
-} // namespace RawSpeed
+} // namespace rawspeed

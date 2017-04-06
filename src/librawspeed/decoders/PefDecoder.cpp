@@ -33,9 +33,7 @@
 #include "tiff/TiffTag.h"                     // for TiffTag, TiffTag::ISOS...
 #include <memory>                             // for unique_ptr
 
-using namespace std;
-
-namespace RawSpeed {
+namespace rawspeed {
 
 RawImage PefDecoder::decodeRawInternal() {
   auto raw = mRootIFD->getIFDWithTag(STRIPOFFSETS);
@@ -110,4 +108,4 @@ void PefDecoder::decodeMetaDataInternal(const CameraMetaData* meta) {
   }
 }
 
-} // namespace RawSpeed
+} // namespace rawspeed

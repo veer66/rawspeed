@@ -25,14 +25,19 @@
 #include "common/RawspeedException.h"
 #include <string>
 
-namespace RawSpeed {
+namespace rawspeed {
 
 class CiffParserException final : public RawspeedException {
 public:
-  CiffParserException(const std::string& msg) : RawspeedException(msg) {}
-  CiffParserException(const char* msg) : RawspeedException(msg) {}
+  explicit CiffParserException(const std::string& msg)
+      : RawspeedException(msg) {}
+  explicit CiffParserException(const char* msg) : RawspeedException(msg) {}
 };
 
-#define ThrowCPE(...) ThrowExceptionHelper(CiffParserException, __VA_ARGS__)
+#define ThrowCPE(...)                                                          \
+  do {                                                                         \
+    ThrowExceptionHelper(rawspeed::CiffParserException, __VA_ARGS__);          \
+    __builtin_unreachable();                                                   \
+  } while (false)
 
-} // namespace RawSpeed
+} // namespace rawspeed

@@ -28,10 +28,26 @@
 #include <string>          // for basic_string, string, allocator
 #include <vector>          // for vector
 
-using namespace std;
-using namespace RawSpeed;
+using std::make_tuple;
+using std::string;
+using std::vector;
+using std::numeric_limits;
+using std::min;
+using rawspeed::isPowerOfTwo;
+using rawspeed::ushort16;
+using rawspeed::uchar8;
+using rawspeed::roundUp;
+using rawspeed::isAligned;
+using rawspeed::isIn;
+using rawspeed::clampBits;
+using rawspeed::trimSpaces;
+using rawspeed::splitString;
+using rawspeed::unroll_loop;
+using rawspeed::getThreadCount;
+using rawspeed::make_unique;
+using rawspeed::copyPixels;
 
-namespace RawSpeedTest {
+namespace rawspeed_test {
 
 using powerOfTwoType = std::tr1::tuple<int, bool>;
 class PowerOfTwoTest : public ::testing::TestWithParam<powerOfTwoType> {
@@ -83,6 +99,25 @@ static const RoundUpType RoundUpValues[] = {
 INSTANTIATE_TEST_CASE_P(RoundUpTest, RoundUpTest,
                         ::testing::ValuesIn(RoundUpValues));
 TEST_P(RoundUpTest, RoundUpTest) { ASSERT_EQ(roundUp(in, multiple), expected); }
+
+using IsAlignedType = std::tr1::tuple<int, int>;
+class IsAlignedTest : public ::testing::TestWithParam<IsAlignedType> {
+protected:
+  IsAlignedTest() = default;
+  virtual void SetUp() {
+    value = std::tr1::get<0>(GetParam());
+    multiple = std::tr1::get<1>(GetParam());
+  }
+
+  int value;
+  int multiple;
+};
+INSTANTIATE_TEST_CASE_P(IsAlignedTest, IsAlignedTest,
+                        ::testing::Combine(::testing::Range(0, 32),
+                                           ::testing::Range(0, 32)));
+TEST_P(IsAlignedTest, IsAlignedAfterRoundUpTest) {
+  ASSERT_TRUE(isAligned(roundUp(value, multiple), multiple));
+}
 
 using IsInType = std::tr1::tuple<string, bool>;
 class IsInTest : public ::testing::TestWithParam<IsInType> {
@@ -317,4 +352,4 @@ TEST_P(CopyPixelsTest, CopyPixelsTest) {
   compare();
 }
 
-} // namespace RawSpeedTest
+} // namespace rawspeed_test

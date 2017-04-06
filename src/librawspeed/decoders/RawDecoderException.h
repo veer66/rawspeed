@@ -24,14 +24,19 @@
 #include "common/RawspeedException.h" // for ThrowException, RawspeedException
 #include <string>                     // for string
 
-namespace RawSpeed {
+namespace rawspeed {
 
 class RawDecoderException : public RawspeedException {
 public:
-  RawDecoderException(const std::string& msg) : RawspeedException(msg) {}
-  RawDecoderException(const char* msg) : RawspeedException(msg) {}
+  explicit RawDecoderException(const std::string& msg)
+      : RawspeedException(msg) {}
+  explicit RawDecoderException(const char* msg) : RawspeedException(msg) {}
 };
 
-#define ThrowRDE(...) ThrowExceptionHelper(RawDecoderException, __VA_ARGS__)
+#define ThrowRDE(...)                                                          \
+  do {                                                                         \
+    ThrowExceptionHelper(rawspeed::RawDecoderException, __VA_ARGS__);          \
+    __builtin_unreachable();                                                   \
+  } while (false)
 
-} // namespace RawSpeed
+} // namespace rawspeed

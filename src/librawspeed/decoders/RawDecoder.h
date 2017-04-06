@@ -32,7 +32,7 @@
 #include <pthread.h>
 #endif
 
-namespace RawSpeed {
+namespace rawspeed {
 
 class Buffer;
 
@@ -46,7 +46,7 @@ class RawDecoder;
 class RawDecoderThread
 {
   public:
-    RawDecoderThread(RawDecoder* parent_) : parent(parent_) {}
+    explicit RawDecoderThread(RawDecoder* parent_) : parent(parent_) {}
     uint32 start_y = 0;
     uint32 end_y = 0;
     const char* error = nullptr;
@@ -57,6 +57,8 @@ class RawDecoderThread
     uint32 taskNo = -1;
 };
 
+void* RawDecoderDecodeThread(void* _this);
+
 class RawDecoder
 {
 public:
@@ -65,7 +67,7 @@ public:
   /* The Buffer is not owned by this class, will not be deleted, and must remain
    */
   /* valid while this object exists */
-  RawDecoder(Buffer* file);
+  explicit RawDecoder(Buffer* file);
   virtual ~RawDecoder() = default;
 
   /* Check if the decoder can decode the image from this camera */
@@ -194,4 +196,4 @@ struct RawDecoder::RawSlice {
   uint32 count = 0;
 };
 
-} // namespace RawSpeed
+} // namespace rawspeed

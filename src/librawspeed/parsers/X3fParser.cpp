@@ -26,46 +26,45 @@
 #include "io/ByteStream.h"                // for ByteStream
 #include "io/Endianness.h"                // for getHostEndianness, Endiann...
 #include "io/IOException.h"               // for IOException
+#include <cassert>                        // for assert
 #include <cstring>                        // for memset
 #include <map>                            // for map, map<>::mapped_type
 #include <string>                         // for string, basic_string, oper...
 #include <vector>                         // for vector
 
-using namespace std;
+using std::string;
 
-namespace RawSpeed {
+namespace rawspeed {
 
 X3fParser::X3fParser(Buffer* file) : RawParser(file) {
   decoder = nullptr;
   bytes = nullptr;
   uint32 size = file->getSize();
-  if (size<104+128)
+  if (size < 104 + 128)
     ThrowRDE("X3F file too small");
 
   bytes = new ByteStream(file, 0, size, getHostEndianness() == little);
 
   try {
-    try {
-      // Read signature
-      if (bytes->getU32() != 0x62564f46)
-        ThrowRDE("Not an X3f file (Signature)");
+    // Read signature
+    if (bytes->getU32() != 0x62564f46)
+      ThrowRDE("Not an X3f file (Signature)");
 
-      uint32 version = bytes->getU32();
-      if (version < 0x00020000)
-        ThrowRDE("File version too old");
+    uint32 version = bytes->getU32();
+    if (version < 0x00020000)
+      ThrowRDE("File version too old");
 
-      // Skip identifier + mark bits
-      bytes->skipBytes(16+4);
+    // Skip identifier + mark bits
+    bytes->skipBytes(16 + 4);
 
-      bytes->setPosition(0);
-      decoder = new X3fDecoder(file);
-      readDirectory();
-    } catch (IOException &e) {
-      ThrowRDE("IO Error while reading header: %s", e.what());
-    }
-  } catch (RawDecoderException &e) {
+    bytes->setPosition(0);
+    decoder = new X3fDecoder(file);
+    readDirectory();
+  } catch (IOException& e) {
+    ThrowRDE("IO Error while reading header: %s", e.what());
+  } catch (RawDecoderException& e) {
     freeObjects();
-    throw e;
+    throw;
   }
 }
 
@@ -262,12 +261,12 @@ static bool ConvertUTF16toUTF8(const UTF16** sourceStart,
       success = false;
       break;
     }
-    switch (bytesToWrite) { /* note: everything falls through. */
-            case 4: *--target = (UTF8)((ch | byteMark) & byteMask); ch >>= 6;
-            case 3: *--target = (UTF8)((ch | byteMark) & byteMask); ch >>= 6;
-            case 2: *--target = (UTF8)((ch | byteMark) & byteMask); ch >>= 6;
-            case 1: *--target =  (UTF8)(ch | firstByteMark[bytesToWrite]);
+    assert(bytesToWrite > 0);
+    for (int i = bytesToWrite; i > 1; i--) {
+      *--target = (UTF8)((ch | byteMark) & byteMask);
+      ch >>= 6;
     }
+    *--target = (UTF8)(ch | firstByteMark[bytesToWrite]);
     target += bytesToWrite;
   }
   // Function modified to retain source + target positions
@@ -331,16 +330,18 @@ void X3fPropertyCollection::addProperties( ByteStream *bytes, uint32 offset, uin
     uint32 key_pos = bytes->getU32();
     uint32 value_pos = bytes->getU32();
     uint32 old_pos = bytes->getPosition();
-    try {
+
+    if (bytes->isValid(key_pos * 2 + data_start, 2) &&
+        bytes->isValid(value_pos * 2 + data_start, 2)) {
       bytes->setPosition(key_pos * 2 + data_start);
       string key = getString(bytes);
       bytes->setPosition(value_pos * 2 + data_start);
       string val = getString(bytes);
       props[key] = val;
-    } catch (IOException &) {
     }
+
     bytes->setPosition(old_pos);
   }
 }
 
-} // namespace RawSpeed
+} // namespace rawspeed

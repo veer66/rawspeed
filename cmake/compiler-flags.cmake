@@ -14,12 +14,33 @@ message(STATUS "Checking for -std=c++11 support - works")
 add_definitions(-g3)
 add_definitions(-ggdb3)
 
-# assertions
-if(CMAKE_BUILD_TYPE MATCHES "^[Re][Ee][Ll][Ee][Aa][Ss][Ee]$")
+if(CMAKE_BUILD_TYPE STREQUAL "RELEASE")
+  # want assertions in all but Release build type.
   add_definitions(-DNDEBUG)
-else()
+elseif(NOT CMAKE_BUILD_TYPE STREQUAL "RELWITHDEBINFO")
+  # if not Release and not RelWithDebInfo build, enable extra debug mode
   add_definitions(-DDEBUG)
 endif()
+
+IF(NOT APPLE)
+  set(linkerflags "-Wl,--as-needed")
+ELSE()
+  set(linkerflags "")
+ENDIF()
+# NOT CMAKE_STATIC_LINKER_FLAGS
+SET(CMAKE_SHARED_LINKER_FLAGS
+    "${CMAKE_SHARED_LINKER_FLAGS} ${linkerflags}"
+    CACHE STRING "" FORCE )
+SET(CMAKE_EXE_LINKER_FLAGS
+    "${CMAKE_EXE_LINKER_FLAGS} ${linkerflags}"
+    CACHE STRING "" FORCE )
+SET(CMAKE_MODULE_LINKER_FLAGS
+    "${CMAKE_MODULE_LINKER_FLAGS} ${linkerflags}"
+    CACHE STRING "" FORCE )
+MARK_AS_ADVANCED(
+    CMAKE_SHARED_LINKER_FLAGS
+    CMAKE_EXE_LINKER_FLAGS
+    CMAKE_MODULE_LINKER_FLAGS )
 
 set(CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG} -O0")
 set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -O0")
@@ -42,7 +63,7 @@ SET(CMAKE_SHARED_LINKER_FLAGS_COVERAGE
     "${coverage_compilation} ${coverage_link}"
     CACHE STRING "Flags used by the shared libraries linker during coverage builds."
     FORCE )
-SET(CMAKE_SHARED_MODULE_FLAGS_COVERAGE
+SET(CMAKE_MODULE_LINKER_FLAGS_COVERAGE
     "${coverage_compilation} ${coverage_link}"
     CACHE STRING "Flags used by the module linker during coverage builds."
     FORCE )
@@ -51,7 +72,7 @@ MARK_AS_ADVANCED(
     CMAKE_C_FLAGS_COVERAGE
     CMAKE_EXE_LINKER_FLAGS_COVERAGE
     CMAKE_SHARED_LINKER_FLAGS_COVERAGE
-    CMAKE_SHARED_MODULE_FLAGS_COVERAGE )
+    CMAKE_MODULE_LINKER_FLAGS_COVERAGE )
 
 # -fstack-protector-all
 set(SANITIZATION_DEFAULTS "-O1 -fno-optimize-sibling-calls")

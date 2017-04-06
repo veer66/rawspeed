@@ -27,10 +27,23 @@
 #include <iostream>        // for hex, endl, ostream
 #include <utility>         // for get
 
-using namespace std;
-using namespace RawSpeed;
+using std::setfill;
+using std::setw;
+using rawspeed::short16;
+using rawspeed::int32;
+using rawspeed::getHostEndianness;
+using rawspeed::getHostEndiannessRuntime;
+using rawspeed::getByteSwapped;
+using rawspeed::getBE;
+using rawspeed::getLE;
+using rawspeed::little;
+using rawspeed::big;
+using rawspeed::getU16BE;
+using rawspeed::getU16LE;
+using rawspeed::getU32BE;
+using rawspeed::getU32LE;
 
-namespace RawSpeedTest {
+namespace rawspeed_test {
 
 TEST(EndiannessTest, getHostEndiannessTests) {
 #if defined(__BYTE_ORDER__)
@@ -357,4 +370,4 @@ TEST_P(doubleTest, getNOP) {
   }
 }
 
-} // namespace RawSpeedTest
+} // namespace rawspeed_test

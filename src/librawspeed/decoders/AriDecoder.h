@@ -25,7 +25,7 @@
 #include "decoders/RawDecoder.h" // for RawDecoder, RawDecoderThread (ptr o...
 #include <string>                // for string
 
-namespace RawSpeed {
+namespace rawspeed {
 
 class CameraMetaData;
 
@@ -33,7 +33,7 @@ class Buffer;
 
 class AriDecoder final : public RawDecoder {
 public:
-  AriDecoder(Buffer* file);
+  explicit AriDecoder(Buffer* file);
   RawImage decodeRawInternal() override;
   void checkSupportInternal(const CameraMetaData* meta) override;
   void decodeMetaDataInternal(const CameraMetaData* meta) override;
@@ -49,4 +49,4 @@ protected:
   float mWB[3];
 };
 
-} // namespace RawSpeed
+} // namespace rawspeed

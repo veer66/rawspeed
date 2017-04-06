@@ -24,11 +24,11 @@
 #include "common/Common.h"  // for uchar8, int32, uint32, ushort16, roundUp
 #include "common/Memory.h"  // for alignedMalloc
 #include "io/Buffer.h"      // for Buffer::size_type, Buffer, DataBuffer
-#include "io/IOException.h" // for ThrowIOE
-#include <cstddef>          // for ptrdiff_t
+#include "io/IOException.h" // for IOException (ptr only), ThrowIOE
+#include <cassert>          // for assert
 #include <cstring>          // for memcmp, memcpy
 
-namespace RawSpeed {
+namespace rawspeed {
 
 class ByteStream : public DataBuffer
 {
@@ -37,8 +37,7 @@ protected:
 
 public:
   ByteStream() = default;
-  ByteStream(const DataBuffer& buffer)
-    : DataBuffer(buffer) {}
+  explicit ByteStream(const DataBuffer& buffer) : DataBuffer(buffer) {}
   ByteStream(const Buffer &buffer, size_type offset, size_type size_,
              bool inNativeByteOrder_ = true)
       : DataBuffer(buffer.getSubView(0, offset + size_), inNativeByteOrder_),
@@ -156,19 +155,29 @@ public:
   // this is only used for DNGPRIVATEDATA handling to restore the original offset
   // in case the private data / maker note has been moved within in the file
   // TODO: could add a lower bound check later if required.
-  void rebase(size_type newPosition, size_type newSize) {
+  void rebase(const size_type newPosition, const size_type newSize) {
+    // does that pair (position, size) make sense for this buffer? may throw
+    const uchar8* const dataRebaseCheck __attribute__((unused)) =
+        Buffer::getData(newPosition, newSize);
+
     const uchar8* dataAtNewPosition = getData(newSize);
-    if ((std::ptrdiff_t)newPosition > (std::ptrdiff_t)dataAtNewPosition)
-      ThrowIOE("Out of bounds access in ByteStream");
     data = dataAtNewPosition - newPosition;
     size = newPosition + newSize;
+
+    // buffer sanity self-check. should not throw, unless there is a mistake
+    const uchar8* const rebasedCheck __attribute__((unused)) = peekData(size);
+
+    // check that all the assumptions still hold, and we rebased correctly
+    assert(getPosition() == newPosition);
+    assert(getSize() == newSize);
+    assert(dataRebaseCheck == rebasedCheck);
   }
 
   // special factory function to set up internal buffer with copy of passed data.
   // only necessary to create 'fake' TiffEntries (see e.g. RAF)
   static ByteStream createCopy(void* data, size_type size) {
     ByteStream bs;
-    auto* new_data = (uchar8*)alignedMalloc<8>(roundUp(size, 8));
+    auto* new_data = alignedMalloc<uchar8, 8>(roundUp(size, 8));
     memcpy(new_data, data, size);
     bs.data = new_data;
     bs.size = size;
@@ -177,4 +186,4 @@ public:
   }
 };
 
-} // namespace RawSpeed
+} // namespace rawspeed

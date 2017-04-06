@@ -33,10 +33,17 @@
 #include <stdexcept>                          // for runtime_error
 #include <string>                             // for string
 
-using namespace std;
-using namespace RawSpeed;
+using std::unique_ptr;
+using rawspeed::RawspeedException;
+using rawspeed::CameraMetadataException;
+using rawspeed::CiffParserException;
+using rawspeed::FileIOException;
+using rawspeed::IOException;
+using rawspeed::RawDecoderException;
+using rawspeed::TiffParserException;
+using rawspeed::FiffParserException;
 
-namespace RawSpeedTest {
+namespace rawspeed_test {
 
 static const std::string msg("my very Smart error Message #1 !");
 
@@ -191,4 +198,4 @@ TYPED_TEST(ExceptionsTest, ThrowHelperTestMessage) {
   }
 }
 
-} // namespace RawSpeedTest
+} // namespace rawspeed_test

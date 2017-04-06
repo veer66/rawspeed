@@ -20,7 +20,7 @@
 
 #pragma once
 
-namespace RawSpeed {
+namespace rawspeed {
 
 class Buffer;
 
@@ -30,11 +30,11 @@ class RawDecoder;
 
 class RawParser {
 public:
-  RawParser(Buffer* inputData) : mInput(inputData) {}
+  explicit RawParser(Buffer* inputData) : mInput(inputData) {}
   RawDecoder* getDecoder(const CameraMetaData* meta = nullptr);
 
 protected:
   Buffer* mInput;
 };
 
-} // namespace RawSpeed
+} // namespace rawspeed

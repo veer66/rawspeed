@@ -22,6 +22,7 @@
 #include "decoders/DngDecoderSlices.h"
 #include "common/Common.h"                          // for uint32, getThrea...
 #include "common/Point.h"                           // for iPoint2D
+#include "common/RawspeedException.h"               // for RawspeedException
 #include "decoders/RawDecoderException.h"           // for RawDecoderException
 #include "decompressors/DeflateDecompressor.h"      // for DeflateDecompressor
 #include "decompressors/JpegDecompressor.h"         // for JpegDecompressor
@@ -32,36 +33,30 @@
 #include "tiff/TiffEntry.h"                         // IWYU pragma: keep
 #include "tiff/TiffIFD.h"                           // for getTiffEndianness
 #include <algorithm>                                // for move
+#include <cassert>                                  // for assert
 #include <cstdio>                                   // for size_t
-#include <exception>                                // for exception
 #include <memory>                                   // for allocator_traits...
 #include <string>                                   // for string, operator+
 #include <vector>                                   // for allocator, vector
 
-using namespace std;
+using std::string;
 
-namespace RawSpeed {
+namespace rawspeed {
 
 void *DecodeThread(void *_this) {
   auto *me = (DngDecoderThread *)_this;
   DngDecoderSlices* parent = me->parent;
   try {
     parent->decodeSlice(me);
-  } catch (const std::exception &exc) {
-    parent->mRaw->setError(string(
-        string("DNGDEcodeThread: Caught exception: ") + string(exc.what())));
-  } catch (...) {
-    parent->mRaw->setError("DNGDEcodeThread: Caught unhandled exception.");
+  } catch (RawspeedException& e) {
+    parent->mRaw->setError(string("Caught exception: ") + e.what());
   }
   return nullptr;
 }
 
 DngDecoderSlices::DngDecoderSlices(Buffer* file, const RawImage& img,
                                    int _compression)
-    : mFile(file), mRaw(img) {
-  mFixLjpeg = false;
-  compression = _compression;
-}
+    : mFile(file), mRaw(img), mFixLjpeg(false), compression(_compression) {}
 
 void DngDecoderSlices::addSlice(std::unique_ptr<DngSliceElement>&& slice) {
   slices.emplace(move(slice));
@@ -110,20 +105,25 @@ void DngDecoderSlices::startDecoding() {
 }
 
 void DngDecoderSlices::decodeSlice(DngDecoderThread* t) {
+  assert(t);
+  assert(mRaw->dim.x > 0);
+  assert(mRaw->dim.y > 0);
+  assert(mRaw->getCpp() > 0);
+  assert(mBps > 0 && mBps <= 32);
+
   if (compression == 1) {
     while (!t->slices.empty()) {
       auto e = move(t->slices.front());
       t->slices.pop();
 
       UncompressedDecompressor decompressor(*mFile, e->byteOffset, e->byteCount,
-                                            mRaw,
-                                            true /* does not matter here */);
+                                            mRaw);
 
       size_t thisTileLength = e->offY + e->height > (uint32)mRaw->dim.y
                                   ? mRaw->dim.y - e->offY
                                   : e->height;
 
-      iPoint2D size(mRaw->dim.x, thisTileLength);
+      iPoint2D tileSize(mRaw->dim.x, thisTileLength);
       iPoint2D pos(0, e->offY);
 
       bool big_endian = (getTiffEndianness(mFile) == big);
@@ -132,9 +132,16 @@ void DngDecoderSlices::decodeSlice(DngDecoderThread* t) {
         big_endian = true;
 
       try {
-        decompressor.readUncompressedRaw(
-            size, pos, mRaw->getCpp() * mRaw->dim.x * mBps / 8, mBps,
-            big_endian ? BitOrder_Jpeg : BitOrder_Plain);
+        const int inputPitchBits = mRaw->getCpp() * mRaw->dim.x * mBps;
+        assert(inputPitchBits > 0);
+
+        const int inputPitch = inputPitchBits / 8;
+        if (inputPitch == 0)
+          ThrowRDE("Data input pitch is too short. Can not decode!");
+
+        decompressor.readUncompressedRaw(tileSize, pos, inputPitch, mBps,
+                                         big_endian ? BitOrder_Jpeg
+                                                    : BitOrder_Plain);
       } catch (RawDecoderException& err) {
         mRaw->setError(err.what());
       } catch (IOException& err) {
@@ -206,4 +213,4 @@ int __attribute__((pure)) DngDecoderSlices::size() {
   return (int)slices.size();
 }
 
-} // namespace RawSpeed
+} // namespace rawspeed

@@ -22,14 +22,14 @@
 
 #include "common/Common.h" // for uint32
 
-namespace RawSpeed {
+namespace rawspeed {
 
 class Buffer;
 
 class FileWriter
 {
 public:
-  FileWriter(const char *filename);
+  explicit FileWriter(const char* filename);
 
   void writeFile(Buffer* fileMap, uint32 size = 0);
   const char* Filename() const { return mFilename; }
@@ -39,4 +39,4 @@ private:
   const char* mFilename;
 };
 
-} // namespace RawSpeed
+} // namespace rawspeed

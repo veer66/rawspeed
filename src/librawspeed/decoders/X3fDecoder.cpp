@@ -22,6 +22,7 @@
 #include "common/Common.h"                // for ushort16, uint32, uchar8
 #include "common/Memory.h"                // for alignedFree, alignedMalloc...
 #include "common/Point.h"                 // for iPoint2D, iRectangle2D
+#include "common/RawspeedException.h"     // for RawspeedException
 #include "decoders/RawDecoderException.h" // for RawDecoderException (ptr o...
 #include "decompressors/HuffmanTable.h"   // for HuffmanTable
 #include "io/Buffer.h"                    // for Buffer::size_type
@@ -31,6 +32,7 @@
 #include "tiff/TiffEntry.h"               // IWYU pragma: keep
 #include "tiff/TiffIFD.h"                 // for TiffID, TiffRootIFD, TiffR...
 #include <algorithm>                      // for max
+#include <array>                          // for array
 #include <cassert>                        // for assert
 #include <cstring>                        // for memset
 #include <istream>                        // for basic_istream::operator>>
@@ -40,9 +42,11 @@
 #include <utility>                        // for pair
 #include <vector>                         // for vector
 
-using namespace std;
+using std::string;
+using std::unique_ptr;
+using std::max;
 
-namespace RawSpeed {
+namespace rawspeed {
 
 X3fDecoder::X3fDecoder(Buffer* file) : RawDecoder(file) {
   bytes = new ByteStream(file, 0, getHostEndianness() == little);
@@ -133,7 +137,7 @@ bool X3fDecoder::readName() {
           mProperties.props["CAMMANUF"] = id.make;
           mProperties.props["CAMMODEL"] = id.model;
           return true;
-        } catch (...) {
+        } catch (RawspeedException&) {
           return false;
         }
       }
@@ -275,7 +279,7 @@ void X3fDecoder::decompressSigma( X3fImage &image )
     //We create a HUGE table that contains all values up to the
     //maximum code length. Luckily values can only be up to 10
     //bits, so we can get away with using 2 bytes/value
-    huge_table = (ushort16*)alignedMallocArray<16, ushort16>(1UL << max_len);
+    huge_table = alignedMallocArray<ushort16, 16, ushort16>(1UL << max_len);
     if (!huge_table)
       ThrowRDE("Memory Allocation failed.");
 
@@ -293,7 +297,7 @@ void X3fDecoder::decompressSigma( X3fImage &image )
     }
     // Load offsets
     ByteStream i2(mFile, image.dataOffset+image.dataSize-mRaw->dim.y*4, (ByteStream::size_type)mRaw->dim.y*4);
-    line_offsets = (uint32*)alignedMallocArray<16, uint32>(mRaw->dim.y);
+    line_offsets = alignedMallocArray<uint32, 16, uint32>(mRaw->dim.y);
     if (!line_offsets)
       ThrowRDE("Memory Allocation failed.");
     for (int y = 0; y < mRaw->dim.y; y++) {
@@ -410,7 +414,10 @@ void X3fDecoder::decodeThreaded( RawDecoderThread* t )
             ThrowRDE("Invalid Huffman value. Image Corrupt");
           }
           bits.skipBitsNoFill(nbits);
-          i += curve[(val >> 5)];
+
+          const ushort16 curveElement = val >> 5;
+          assert(curveElement < curve.size());
+          i += curve[curveElement];
           dst[0] = clampBits(i, 16);
           dst++;
         }
@@ -475,4 +482,4 @@ Buffer* X3fDecoder::getCompressedData() {
   return nullptr;
 }
 
-} // namespace RawSpeed
+} // namespace rawspeed

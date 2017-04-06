@@ -35,9 +35,9 @@
 #include <cmath>                                    // for NAN
 #include <memory>                                   // for unique_ptr
 
-using namespace std;
+using std::max;
 
-namespace RawSpeed {
+namespace rawspeed {
 
 class CameraMetaData;
 
@@ -85,6 +85,8 @@ void MrwDecoder::parseHeader() {
       // Base value for offsets needs to be at the beginning of the TIFF block, not the file
       rootIFD = TiffParser::parse(mFile->getSubView(currpos + 8));
       break;
+    default:
+      break;
     }
     currpos += max(len + 8, 1u); // max(,1) to make sure we make progress
   }
@@ -94,13 +96,13 @@ RawImage MrwDecoder::decodeRawInternal() {
   mRaw->dim = iPoint2D(raw_width, raw_height);
   mRaw->createData();
 
-  UncompressedDecompressor u(*mFile, data_offset, mRaw, uncorrectedRawValues);
+  UncompressedDecompressor u(*mFile, data_offset, mRaw);
 
   try {
     if (packed)
-      u.decode12BitRawBE(raw_width, raw_height);
+      u.decode12BitRaw<big>(raw_width, raw_height);
     else
-      u.decode12BitRawBEunpacked(raw_width, raw_height);
+      u.decodeRawUnpacked<12, big>(raw_width, raw_height);
   } catch (IOException &e) {
     mRaw->setError(e.what());
     // Let's ignore it, it may have delivered somewhat useful data.
@@ -135,4 +137,4 @@ void MrwDecoder::decodeMetaDataInternal(const CameraMetaData* meta) {
   }
 }
 
-} // namespace RawSpeed
+} // namespace rawspeed

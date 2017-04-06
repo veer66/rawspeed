@@ -31,9 +31,11 @@
 #include <cstdlib>                        // for free
 #include <cstring>                        // for memset, memcpy, strdup
 
-using namespace std;
+using std::fill_n;
+using std::string;
+using std::min;
 
-namespace RawSpeed {
+namespace rawspeed {
 
 RawImageData::RawImageData() : cfa(iPoint2D(0, 0)) {
   fill_n(blackLevelSeparate, 4, -1);
@@ -81,18 +83,98 @@ RawImageData::~RawImageData() {
 
 
 void RawImageData::createData() {
+  static constexpr const auto alignment = 16;
+
   if (dim.x > 65535 || dim.y > 65535)
     ThrowRDE("Dimensions too large for allocation.");
   if (dim.x <= 0 || dim.y <= 0)
     ThrowRDE("Dimension of one sides is less than 1 - cannot allocate image.");
   if (data)
     ThrowRDE("Duplicate data allocation in createData.");
-  pitch = roundUp((size_t)dim.x * bpp, 16);
-  data = (uchar8*)alignedMallocArray<16>(dim.y, pitch);
+
+  // want each line to start at 16-byte aligned address
+  pitch = roundUp((size_t)dim.x * bpp, alignment);
+  assert(isAligned(pitch, alignment));
+
+#if defined(DEBUG) || __has_feature(address_sanitizer) ||                      \
+    defined(__SANITIZE_ADDRESS__)
+  // want to ensure that we have some padding
+  pitch += alignment * alignment;
+  assert(isAligned(pitch, alignment));
+#endif
+
+  padding = pitch - dim.x * bpp;
+
+#if defined(DEBUG) || __has_feature(address_sanitizer) ||                      \
+    defined(__SANITIZE_ADDRESS__)
+  assert(padding > 0);
+#endif
+
+  data = alignedMallocArray<uchar8, alignment>(dim.y, pitch);
+
   if (!data)
     ThrowRDE("Memory Allocation failed.");
+
   uncropped_dim = dim;
+
+#ifndef NDEBUG
+  if (dim.y > 1) {
+    // padding is the size of the area after last pixel of line n
+    // and before the first pixel of line n+1
+    assert(getData(dim.x - 1, 0) + bpp + padding == getData(0, 1));
+  }
+
+  for (int j = 0; j < dim.y; j++) {
+    const uchar8* const line = getData(0, j);
+    // each line is indeed 16-byte aligned
+    assert(isAligned(line, alignment));
+  }
+#endif
+
+  poisonPadding();
 }
+
+#if __has_feature(address_sanitizer) || defined(__SANITIZE_ADDRESS__)
+void RawImageData::poisonPadding() {
+  if (padding <= 0)
+    return;
+
+  for (int j = 0; j < uncropped_dim.y; j++) {
+    const uchar8* const curr_line_end =
+        getDataUncropped(uncropped_dim.x - 1, j) + bpp;
+
+    // and now poison the padding.
+    ASAN_POISON_MEMORY_REGION(curr_line_end, padding);
+  }
+}
+#else
+void __attribute__((const)) RawImageData::poisonPadding() {
+  // if we are building without ASAN, then there is no need/way to poison.
+  // however, i think it is better to have such an empty function rather
+  // than making this whole function not exist in ASAN-less builds
+}
+#endif
+
+#if __has_feature(address_sanitizer) || defined(__SANITIZE_ADDRESS__)
+void RawImageData::unpoisonPadding() {
+  if (padding <= 0)
+    return;
+
+  for (int j = 0; j < uncropped_dim.y; j++) {
+    const uchar8* const curr_line_end =
+        getDataUncropped(uncropped_dim.x - 1, j) + bpp;
+
+    // and now unpoison the padding.
+    ASAN_UNPOISON_MEMORY_REGION(curr_line_end, padding);
+  }
+}
+#else
+void __attribute__((const)) RawImageData::unpoisonPadding() {
+  // if we are building without ASAN, then there is no need/way to poison.
+  // however, i think it is better to have such an empty function rather
+  // than making this whole function not exist in ASAN-less builds
+}
+#endif
 
 void RawImageData::destroyData() {
   if (data)
@@ -136,7 +218,7 @@ uchar8* RawImageData::getData(uint32 x, uint32 y) {
   if (!data)
     ThrowRDE("Data not yet allocated.");
 
-  return &data[y*pitch+x*bpp];
+  return &data[(size_t)y * pitch + x * bpp];
 }
 
 uchar8* RawImageData::getDataUncropped(uint32 x, uint32 y) {
@@ -149,10 +231,10 @@ uchar8* RawImageData::getDataUncropped(uint32 x, uint32 y) {
   if (!data)
     ThrowRDE("Data not yet allocated.");
 
-  return &data[y*pitch+x*bpp];
+  return &data[(size_t)y * pitch + x * bpp];
 }
 
-iPoint2D __attribute__((pure)) RawSpeed::RawImageData::getUncroppedDim() const {
+iPoint2D __attribute__((pure)) rawspeed::RawImageData::getUncroppedDim() const {
   return uncropped_dim;
 }
 
@@ -198,7 +280,8 @@ void RawImageData::createBadPixelMap()
   if (!isAllocated())
     ThrowRDE("(internal) Bad pixel map cannot be allocated before image.");
   mBadPixelMapPitch = roundUp(uncropped_dim.x / 8, 16);
-  mBadPixelMap = (uchar8*)alignedMallocArray<16>(uncropped_dim.y, mBadPixelMapPitch);
+  mBadPixelMap =
+      alignedMallocArray<uchar8, 16>(uncropped_dim.y, mBadPixelMapPitch);
   memset(mBadPixelMap, 0, (size_t)mBadPixelMapPitch * uncropped_dim.y);
   if (!mBadPixelMap)
     ThrowRDE("Memory Allocation failed.");
@@ -352,11 +435,11 @@ void RawImageData::fixBadPixelsThread( int start_y, int end_y )
   int bad_count = 0;
 #endif
   for (int y = start_y; y < end_y; y++) {
-    auto *bad_map = (uint32 *)&mBadPixelMap[y * mBadPixelMapPitch];
+    auto* bad_map = (const uint32*)&mBadPixelMap[y * mBadPixelMapPitch];
     for (int x = 0 ; x < gw; x++) {
       // Test if there is a bad pixel within these 32 pixels
       if (bad_map[x] != 0) {
-        auto *bad = (uchar8 *)&bad_map[x];
+        auto* bad = (const uchar8*)&bad_map[x];
         // Go through each pixel
         for (int i = 0; i < 4; i++) {
           for (int j = 0; j < 8; j++) {
@@ -449,33 +532,44 @@ void RawImageData::clearArea( iRectangle2D area, uchar8 val /*= 0*/ )
     memset(getData(area.getLeft(), y), val, (size_t)area.getWidth() * bpp);
 }
 
-RawImage& RawImage::operator=(const RawImage& p) noexcept {
-  if (this == &p)      // Same object?
-    return *this;      // Yes, so skip assignment, and just return *this.
+RawImage& RawImage::operator=(RawImage&& rhs) noexcept {
+  if (this == &rhs)
+    return *this;
+
 #ifdef HAVE_PTHREAD
   pthread_mutex_lock(&p_->mymutex);
 #endif
+
   // Retain the old RawImageData before overwriting it
   RawImageData* const old = p_;
-  p_ = p.p_;
+  p_ = rhs.p_;
+
   // Increment use on new data
   ++p_->dataRefCount;
+
   // If the RawImageData previously used by "this" is unused, delete it.
   if (--old->dataRefCount == 0) {
 #ifdef HAVE_PTHREAD
     pthread_mutex_unlock(&(old->mymutex));
 #endif
+
     delete old;
   } else {
 #ifdef HAVE_PTHREAD
     pthread_mutex_unlock(&(old->mymutex));
 #endif
   }
+
   return *this;
 }
 
-RawImage& RawImage::operator=(RawImage&& p) noexcept {
-  operator=(p);
+RawImage& RawImage::operator=(const RawImage& rhs) noexcept {
+  if (this == &rhs)
+    return *this;
+
+  RawImage tmp(rhs);
+  *this = std::move(tmp);
+
   return *this;
 }
 
@@ -485,12 +579,9 @@ void *RawImageWorkerThread(void *_this) {
   return nullptr;
 }
 
-RawImageWorker::RawImageWorker( RawImageData *_img, RawImageWorkerTask _task, int _start_y, int _end_y )
-{
-  data = _img;
-  start_y = _start_y;
-  end_y = _end_y;
-  task = _task;
+RawImageWorker::RawImageWorker(RawImageData* _img, RawImageWorkerTask _task,
+                               int _start_y, int _end_y)
+    : data(_img), task(_task), start_y(_start_y), end_y(_end_y) {
 #ifdef HAVE_PTHREAD
   pthread_attr_init(&attr);
   pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
@@ -622,5 +713,4 @@ ushort16* TableLookUp::getTable(int n) {
   return &tables[n * TABLE_SIZE];
 }
 
-
-} // namespace RawSpeed
+} // namespace rawspeed

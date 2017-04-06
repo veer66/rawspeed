@@ -22,10 +22,11 @@
 #include <gtest/gtest.h>     // for AssertionResult, GetBoolAssertionFailur...
 #include <string>            // for basic_string, string
 
-using namespace std;
-using namespace RawSpeed;
+using std::string;
+using std::to_string;
+using rawspeed::Hints;
 
-namespace RawSpeedTest {
+namespace rawspeed_test {
 
 TEST(CameraTest, HintsEmpty) {
   Hints hints;
@@ -153,4 +154,4 @@ TEST_P(BoolHintTest, HintsBool) {
   ASSERT_FALSE(hints.get(key, true));
 }
 
-} // namespace RawSpeedTest
+} // namespace rawspeed_test

@@ -20,14 +20,14 @@
 
 #pragma once
 
-namespace RawSpeed {
+namespace rawspeed {
 
 class Buffer;
 
 class FileReader
 {
 public:
-  FileReader(const char *filename);
+  explicit FileReader(const char* filename);
 
   Buffer* readFile();
   const char* Filename() const { return mFilename; }
@@ -37,4 +37,4 @@ private:
   const char* mFilename;
 };
 
-} // namespace RawSpeed
+} // namespace rawspeed

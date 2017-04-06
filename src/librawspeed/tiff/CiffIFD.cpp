@@ -21,6 +21,7 @@
 
 #include "tiff/CiffIFD.h"
 #include "common/Common.h"               // for uint32, ushort16
+#include "common/RawspeedException.h"    // for RawspeedException
 #include "io/Buffer.h"                   // for Buffer
 #include "io/Endianness.h"               // for getU16LE, getU32LE
 #include "io/IOException.h"              // for IOException
@@ -33,9 +34,12 @@
 #include <utility>                       // for pair
 #include <vector>                        // for vector
 
-using namespace std;
+using std::string;
+using std::vector;
+using std::numeric_limits;
+using std::unique_ptr;
 
-namespace RawSpeed {
+namespace rawspeed {
 
 #define CIFF_DEPTH(_depth)                                                     \
   if ((depth = (_depth) + 1) > 10)                                             \
@@ -88,7 +92,7 @@ CiffIFD::CiffIFD(CiffIFD* parent_, Buffer* f, uint32 start, uint32 end,
       default:
         add(move(t));
       }
-    } catch (...) {
+    } catch (RawspeedException&) {
       // Unparsable private data are added as entries
       add(move(t));
     }
@@ -224,4 +228,4 @@ bool __attribute__((pure)) CiffIFD::hasEntry(CiffTag tag) {
   return mEntry.find(tag) != mEntry.end();
 }
 
-} // namespace RawSpeed
+} // namespace rawspeed

@@ -24,14 +24,19 @@
 #include "common/RawspeedException.h"
 #include <string>
 
-namespace RawSpeed {
+namespace rawspeed {
 
 class TiffParserException final : public RawspeedException {
 public:
-  TiffParserException(const std::string& msg) : RawspeedException(msg) {}
-  TiffParserException(const char* msg) : RawspeedException(msg) {}
+  explicit TiffParserException(const std::string& msg)
+      : RawspeedException(msg) {}
+  explicit TiffParserException(const char* msg) : RawspeedException(msg) {}
 };
 
-#define ThrowTPE(...) ThrowExceptionHelper(TiffParserException, __VA_ARGS__)
+#define ThrowTPE(...)                                                          \
+  do {                                                                         \
+    ThrowExceptionHelper(rawspeed::TiffParserException, __VA_ARGS__);          \
+    __builtin_unreachable();                                                   \
+  } while (false)
 
-} // namespace RawSpeed
+} // namespace rawspeed

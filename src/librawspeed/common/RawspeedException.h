@@ -29,10 +29,10 @@
 #include <stdexcept>
 #include <string>
 
-namespace RawSpeed {
+namespace rawspeed {
 
 template <typename T>
-[[noreturn]] void __attribute__((format(printf, 1, 2)))
+[[noreturn]] static inline void __attribute__((noreturn, format(printf, 1, 2)))
 ThrowException(const char* fmt, ...) {
   static constexpr size_t bufSize = 8192;
 #if defined(HAVE_THREAD_LOCAL)
@@ -60,10 +60,12 @@ private:
   }
 
 public:
-  RawspeedException(const std::string& msg) : std::runtime_error(msg) {
+  explicit RawspeedException(const std::string& msg) : std::runtime_error(msg) {
     log(msg.c_str());
   }
-  RawspeedException(const char* msg) : std::runtime_error(msg) { log(msg); }
+  explicit RawspeedException(const char* msg) : std::runtime_error(msg) {
+    log(msg);
+  }
 };
 
 #undef XSTR
@@ -74,14 +76,24 @@ public:
 
 #ifndef DEBUG
 #define ThrowExceptionHelper(CLASS, fmt, ...)                                  \
-  ThrowException<CLASS>("%s, line " STR(__LINE__) ": " fmt,                    \
-                        __PRETTY_FUNCTION__, ##__VA_ARGS__)
+  do {                                                                         \
+    rawspeed::ThrowException<CLASS>("%s, line " STR(__LINE__) ": " fmt,        \
+                                    __PRETTY_FUNCTION__, ##__VA_ARGS__);       \
+    __builtin_unreachable();                                                   \
+  } while (false)
 #else
 #define ThrowExceptionHelper(CLASS, fmt, ...)                                  \
-  ThrowException<CLASS>(__FILE__ ":" STR(__LINE__) ": %s: " fmt,               \
-                        __PRETTY_FUNCTION__, ##__VA_ARGS__)
+  do {                                                                         \
+    rawspeed::ThrowException<CLASS>(__FILE__ ":" STR(__LINE__) ": %s: " fmt,   \
+                                    __PRETTY_FUNCTION__, ##__VA_ARGS__);       \
+    __builtin_unreachable();                                                   \
+  } while (false)
 #endif
 
-#define ThrowRSE(...) ThrowExceptionHelper(RawspeedException, __VA_ARGS__)
+#define ThrowRSE(...)                                                          \
+  do {                                                                         \
+    ThrowExceptionHelper(rawspeed::RawspeedException, __VA_ARGS__);            \
+    __builtin_unreachable();                                                   \
+  } while (false)
 
-} // namespace RawSpeed
+} // namespace rawspeed

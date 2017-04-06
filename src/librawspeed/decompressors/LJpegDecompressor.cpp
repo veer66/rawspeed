@@ -21,14 +21,16 @@
 #include "decompressors/LJpegDecompressor.h"
 #include "common/Common.h"                // for unroll_loop, uint32, ushort16
 #include "common/Point.h"                 // for iPoint2D
+#include "common/RawImage.h"              // for RawImage, RawImageData
 #include "decoders/RawDecoderException.h" // for ThrowRDE
 #include "io/BitPumpJPEG.h"               // for BitStream<>::getBufferPosi...
 #include "io/ByteStream.h"                // for ByteStream
 #include <algorithm>                      // for min, copy_n
 
-using namespace std;
+using std::copy_n;
+using std::min;
 
-namespace RawSpeed {
+namespace rawspeed {
 
 void LJpegDecompressor::decode(uint32 offsetX, uint32 offsetY, bool fixDng16Bug_) {
   if ((int)offsetX >= mRaw->dim.x)
@@ -112,4 +114,4 @@ void LJpegDecompressor::decodeN()
   input.skipBytes(bitStream.getBufferPosition());
 }
 
-} // namespace RawSpeed
+} // namespace rawspeed

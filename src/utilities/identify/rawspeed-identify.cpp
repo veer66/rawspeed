@@ -22,7 +22,6 @@
 #include <cstddef>    // for size_t
 #include <cstdint>    // for uint16_t
 #include <cstdio>     // for fprintf, stdout, stderr, printf
-#include <exception>  // for exception
 #include <memory>     // for unique_ptr
 #include <string>     // for string, operator+
 #include <sys/stat.h> // for stat
@@ -40,7 +39,11 @@ int __attribute__((const)) rawspeed_get_number_of_processor_cores() {
 }
 #endif
 
-using namespace RawSpeed;
+namespace rawspeed {
+
+namespace identify {
+
+std::string find_cameras_xml(const char* argv0);
 
 std::string find_cameras_xml(const char *argv0) {
   struct stat statbuf;
@@ -104,6 +107,24 @@ std::string find_cameras_xml(const char *argv0) {
 
   return found_camfile;
 }
+
+} // namespace identify
+
+} // namespace rawspeed
+
+using rawspeed::CameraMetaData;
+using rawspeed::FileReader;
+using rawspeed::Buffer;
+using rawspeed::RawParser;
+using rawspeed::RawDecoder;
+using rawspeed::RawImage;
+using rawspeed::uchar8;
+using rawspeed::uint32;
+using rawspeed::iPoint2D;
+using rawspeed::TYPE_USHORT16;
+using rawspeed::TYPE_FLOAT32;
+using rawspeed::RawspeedException;
+using rawspeed::identify::find_cameras_xml;
 
 int main(int argc, char *argv[]) {
 
@@ -249,15 +270,12 @@ int main(int argc, char *argv[]) {
       fprintf(stdout, "Image uint16_t avg: %lf\n",
               sum / (double)(dimUncropped.y * dimUncropped.x));
     }
-  } catch (const std::exception &exc) {
-    printf("ERROR: [rawspeed] %s\n", exc.what());
+  } catch (RawspeedException& e) {
+    printf("ERROR: [rawspeed] %s\n", e.what());
 
     /* if an exception is raised lets not retry or handle the
      specific ones, consider the file as corrupted */
     return 0;
-  } catch (...) {
-    printf("Unhandled exception in rawspeed-identify\n");
-    return 3;
   }
 
   return 0;

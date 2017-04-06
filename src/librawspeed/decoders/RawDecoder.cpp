@@ -42,9 +42,11 @@
 #include <string>                                   // for string, basic_st...
 #include <vector>                                   // for vector
 
-using namespace std;
+using std::vector;
+using std::string;
+using std::min;
 
-namespace RawSpeed {
+namespace rawspeed {
 
 RawDecoder::RawDecoder(Buffer* file) : mRaw(RawImage::create()), mFile(file) {
   failOnUnknown = false;
@@ -92,8 +94,7 @@ void RawDecoder::decodeUncompressed(const TiffIFD *rawIFD, BitOrder order) {
   offY = 0;
   for (uint32 i = 0; i < slices.size(); i++) {
     RawSlice slice = slices[i];
-    UncompressedDecompressor u(*mFile, slice.offset, slice.count, mRaw,
-                               uncorrectedRawValues);
+    UncompressedDecompressor u(*mFile, slice.offset, slice.count, mRaw);
     iPoint2D size(width, slice.h);
     iPoint2D pos(0, offY);
     bitPerPixel = (int)((uint64)((uint64)slice.count * 8u) / (slice.h * width));
@@ -289,8 +290,7 @@ void RawDecoder::decodeThreaded(RawDecoderThread * t) {
   ThrowRDE("This class does not support threaded decoding");
 }
 
-RawSpeed::RawImage RawDecoder::decodeRaw()
-{
+rawspeed::RawImage RawDecoder::decodeRaw() {
   try {
     RawImage raw = decodeRawInternal();
     raw->metadata.pixelAspectRatio =
@@ -305,12 +305,12 @@ RawSpeed::RawImage RawDecoder::decodeRaw()
   } catch (IOException &e) {
     ThrowRDE("%s", e.what());
   }
-  return nullptr;
+  return RawImage(nullptr);
 }
 
 void RawDecoder::decodeMetaData(const CameraMetaData* meta) {
   try {
-    return decodeMetaDataInternal(meta);
+    decodeMetaDataInternal(meta);
   } catch (TiffParserException &e) {
     ThrowRDE("%s", e.what());
   } catch (FileIOException &e) {
@@ -322,7 +322,7 @@ void RawDecoder::decodeMetaData(const CameraMetaData* meta) {
 
 void RawDecoder::checkSupport(const CameraMetaData* meta) {
   try {
-    return checkSupportInternal(meta);
+    checkSupportInternal(meta);
   } catch (TiffParserException &e) {
     ThrowRDE("%s", e.what());
   } catch (FileIOException &e) {
@@ -375,4 +375,4 @@ void RawDecoder::startTasks( uint32 tasks )
 #endif
 }
 
-} // namespace RawSpeed
+} // namespace rawspeed

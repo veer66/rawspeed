@@ -37,3 +37,12 @@ cscope.out
 testimg
 Release-*
 Debug-*
+
+# sonarqube
+.scannerwork/
+bw-output/
+
+# coverage
+*.gcno
+*.gcda
+*.gcov

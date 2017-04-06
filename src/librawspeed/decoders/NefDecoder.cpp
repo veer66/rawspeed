@@ -20,10 +20,10 @@
 */
 
 #include "decoders/NefDecoder.h"
-#include "common/Common.h"                          // for uint32, uchar8
-#include "common/Memory.h"                          // for alignedFree, ali...
-#include "common/Point.h"                           // for iPoint2D
-#include "decoders/RawDecoderException.h"           // for ThrowRDE, RawDec...
+#include "common/Common.h"                   // for uint32, uchar8
+#include "common/Memory.h"                   // for alignedFree, ali...
+#include "common/Point.h"                    // for iPoint2D
+#include "decoders/RawDecoderException.h"    // for ThrowRDE, RawDec...
 #include "decompressors/NikonDecompressor.h" // for NikonDecompressor::decompress
 #include "decompressors/UncompressedDecompressor.h" // for UncompressedDeco...
 #include "io/BitPumpMSB.h"                          // for BitPumpMSB
@@ -38,6 +38,7 @@
 #include "tiff/TiffEntry.h"                         // for TiffEntry, TiffD...
 #include "tiff/TiffIFD.h"                           // for TiffRootIFD, Tif...
 #include "tiff/TiffTag.h"                           // for TiffTag, TiffTag...
+#include <cassert>                                  // for assert
 #include <cmath>                                    // for pow, exp, log
 #include <cstring>                                  // for strncmp
 #include <memory>                                   // for unique_ptr, allo...
@@ -46,9 +47,12 @@
 #include <vector>                                   // for vector
 // IWYU pragma: no_include <ext/alloc_traits.h>
 
-using namespace std;
+using std::vector;
+using std::string;
+using std::min;
+using std::ostringstream;
 
-namespace RawSpeed {
+namespace rawspeed {
 
 RawImage NefDecoder::decodeRawInternal() {
   auto raw = mRootIFD->getIFDWithTag(CFAPATTERN);
@@ -210,7 +214,7 @@ void NefDecoder::DecodeUncompressed() {
         if (hints.has("coolpixsplit"))
           readCoolpixSplitRaw(in, size, pos, width * bitPerPixel / 8);
         else {
-          UncompressedDecompressor u(in, mRaw, uncorrectedRawValues);
+          UncompressedDecompressor u(in, mRaw);
           u.readUncompressedRaw(size, pos, width * bitPerPixel / 8, bitPerPixel,
                                 bitorder ? BitOrder_Jpeg : BitOrder_Plain);
         }
@@ -317,9 +321,9 @@ void NefDecoder::DecodeD100Uncompressed() {
   mRaw->dim = iPoint2D(width, height);
   mRaw->createData();
 
-  UncompressedDecompressor u(*mFile, offset, mRaw, uncorrectedRawValues);
+  UncompressedDecompressor u(*mFile, offset, mRaw);
 
-  u.decode12BitRawBEWithControl(width, height);
+  u.decode12BitRaw<big, false, true>(width, height);
 }
 
 void NefDecoder::DecodeSNefUncompressed() {
@@ -431,7 +435,7 @@ void NefDecoder::decodeMetaDataInternal(const CameraMetaData* meta) {
       mRaw->metadata.wbCoeffs[0] = wb->getFloat(0);
       mRaw->metadata.wbCoeffs[1] = wb->getFloat(2);
       mRaw->metadata.wbCoeffs[2] = wb->getFloat(1);
-      if (mRaw->metadata.wbCoeffs[1] == 0.0f)
+      if (mRaw->metadata.wbCoeffs[1] <= 0.0f)
         mRaw->metadata.wbCoeffs[1] = 1.0f;
     }
   } else if (mRootIFD->hasEntryRecursive((TiffTag)0x0097)) {
@@ -488,14 +492,14 @@ void NefDecoder::decodeMetaDataInternal(const CameraMetaData* meta) {
     }
   } else if (mRootIFD->hasEntryRecursive((TiffTag)0x0014)) {
     TiffEntry* wb = mRootIFD->getEntryRecursive((TiffTag)0x0014);
-    auto *tmp = (uchar8 *)wb->getData(wb->count);
+    auto* tmp = (const uchar8*)wb->getData(wb->count);
     if (wb->count == 2560 && wb->type == TIFF_UNDEFINED) {
       mRaw->metadata.wbCoeffs[0] = (float) getU16BE(tmp + 1248) / 256.0f;
       mRaw->metadata.wbCoeffs[1] = 1.0f;
       mRaw->metadata.wbCoeffs[2] = (float) getU16BE(tmp + 1250) / 256.0f;
-    } else if (!strncmp((char *)tmp,"NRW ",4)) {
+    } else if (!strncmp((const char*)tmp, "NRW ", 4)) {
       uint32 offset = 0;
-      if (strncmp((char *)tmp + 4, "0100", 4) != 0 && wb->count > 72)
+      if (strncmp((const char*)tmp + 4, "0100", 4) != 0 && wb->count > 72)
         offset = 56;
       else if (wb->count > 1572)
         offset = 1556;
@@ -555,13 +559,14 @@ void NefDecoder::DecodeNikonSNef(ByteStream &input, uint32 w, uint32 h) {
   if (!wb)
     ThrowRDE("Unable to locate whitebalance needed for decompression");
 
+  assert(wb != nullptr);
   if (wb->count != 4 || wb->type != TIFF_RATIONAL)
     ThrowRDE("Whitebalance has unknown count or type");
 
   float wb_r = wb->getFloat(0);
   float wb_b = wb->getFloat(1);
 
-  if (wb_r == 0.0f || wb_b == 0.0f)
+  if (wb_r <= 0.0f || wb_b <= 0.0f)
     ThrowRDE("Whitebalance has zero value");
 
   mRaw->metadata.wbCoeffs[0] = wb_r;
@@ -642,10 +647,10 @@ void NefDecoder::DecodeNikonSNef(ByteStream &input, uint32 w, uint32 h) {
 // From:  dcraw.c -- Dave Coffin's raw photo decoder
 #define SQR(x) ((x)*(x))
 ushort16* NefDecoder::gammaCurve(double pwr, double ts, int mode, int imax) {
-  auto* curve = (ushort16*)alignedMallocArray<16, ushort16>(65536);
-  if (curve == nullptr) {
+  auto* curve = alignedMallocArray<ushort16, 16, ushort16>(65536);
+  if (curve == nullptr)
     ThrowRDE("Unable to allocate gamma curve");
-  }
+
   int i;
   double g[6], bnd[2]={0,0}, r;
   g[0] = pwr;
@@ -666,9 +671,10 @@ ushort16* NefDecoder::gammaCurve(double pwr, double ts, int mode, int imax) {
   else g[5] = 1 / (g[1]*SQR(g[3])/2 + 1
     - g[2] - g[3] - g[2]*g[3]*(log(g[3]) - 1)) - 1;
 
-  if (!mode--) {
+  if (!mode--)
     ThrowRDE("Unimplemented mode");
-  }
+
+  assert(curve != nullptr);
   for (i=0; i < 0x10000; i++) {
     curve[i] = 0xffff;
     if ((r = (double) i / imax) < 1) {
@@ -682,4 +688,4 @@ ushort16* NefDecoder::gammaCurve(double pwr, double ts, int mode, int imax) {
 }
 #undef SQR
 
-} // namespace RawSpeed
+} // namespace rawspeed

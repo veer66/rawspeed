@@ -24,14 +24,13 @@
 #include "common/Point.h"                           // for iPoint2D
 #include "decompressors/UncompressedDecompressor.h" // for UncompressedDeco...
 #include "io/Buffer.h"                              // for Buffer
+#include "io/Endianness.h"                          // for Endiannes
 #include "tiff/TiffEntry.h"                         // for TiffEntry
 #include "tiff/TiffIFD.h"                           // for TiffIFD, TiffRoo...
 #include "tiff/TiffTag.h"                           // for TiffTag::STRIPOF...
 #include <memory>                                   // for unique_ptr
 
-using namespace std;
-
-namespace RawSpeed {
+namespace rawspeed {
 
 RawImage MefDecoder::decodeRawInternal() {
   auto raw = mRootIFD->getIFDWithTag(STRIPOFFSETS, 1);
@@ -47,9 +46,9 @@ RawImage MefDecoder::decodeRawInternal() {
   mRaw->dim = iPoint2D(width, height);
   mRaw->createData();
 
-  UncompressedDecompressor u(*mFile, off, mRaw, uncorrectedRawValues);
+  UncompressedDecompressor u(*mFile, off, mRaw);
 
-  u.decode12BitRawBE(width, height);
+  u.decode12BitRaw<big>(width, height);
 
   return mRaw;
 }
@@ -58,4 +57,4 @@ void MefDecoder::decodeMetaDataInternal(const CameraMetaData* meta) {
   setMetaData(meta, "", 0);
 }
 
-} // namespace RawSpeed
+} // namespace rawspeed

@@ -28,7 +28,7 @@
 #include <algorithm>        // for swap
 #include <memory>           // for unique_ptr
 
-namespace RawSpeed {
+namespace rawspeed {
 
 // This allows to specify the nuber of bytes that each Buffer needs to
 // allocate additionally to be able to remove one runtime bounds check
@@ -67,7 +67,7 @@ public:
          size_type size_);
 
   // Allocates the memory
-  Buffer(size_type size);
+  explicit Buffer(size_type size);
 
   // Data already allocated
   explicit Buffer(const uchar8* data_, size_type size_)
@@ -84,6 +84,7 @@ public:
     : data(rhs.data), size(rhs.size), isOwner(rhs.isOwner) { rhs.isOwner = false; }
   // Frees memory if owned
   ~Buffer();
+  Buffer& operator=(Buffer&& rhs) noexcept;
   Buffer& operator=(const Buffer& rhs);
 
   Buffer getSubView(size_type offset, size_type size_) const {
@@ -128,7 +129,7 @@ public:
   }
 
   inline bool isValid(size_type offset, size_type count = 1) const {
-    return (uint64)offset + count < (uint64)size + BUFFER_PADDING + 1;
+    return (uint64)offset + count <= (uint64)size + BUFFER_PADDING;
   }
 
 //  Buffer* clone();
@@ -152,7 +153,7 @@ class DataBuffer : public Buffer
   bool inNativeByteOrder = true;
 public:
   DataBuffer() = default;
-  DataBuffer(const Buffer &data_, bool inNativeByteOrder_ = true)
+  explicit DataBuffer(const Buffer& data_, bool inNativeByteOrder_ = true)
       : Buffer(data_), inNativeByteOrder(inNativeByteOrder_) {}
 
   // get memory of type T from byte offset 'offset + sizeof(T)*index' and swap byte order if required
@@ -170,4 +171,4 @@ public:
   }
 };
 
-} // namespace RawSpeed
+} // namespace rawspeed

@@ -35,7 +35,7 @@ namespace pugi {
 class xml_node;
 } // namespace pugi
 
-namespace RawSpeed {
+namespace rawspeed {
 
 class Hints
 {
@@ -73,7 +73,7 @@ public:
 class Camera
 {
 public:
-  Camera(pugi::xml_node &camera);
+  explicit Camera(pugi::xml_node& camera);
   Camera(const Camera* camera, uint32 alias_num);
   const CameraSensorInfo* getSensorInfo(int iso) const;
   std::string make;
@@ -108,4 +108,4 @@ protected:
   void parseCameraChild(const pugi::xml_node &node);
 };
 
-} // namespace RawSpeed
+} // namespace rawspeed

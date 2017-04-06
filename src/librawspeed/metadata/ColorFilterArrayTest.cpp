@@ -26,18 +26,28 @@
 #include <iosfwd>                      // for ostream
 #include <string>                      // for string, operator<<
 
-using namespace std;
-using namespace RawSpeed;
+using std::string;
+using rawspeed::uint32;
+using rawspeed::iPoint2D;
+using rawspeed::CFAColor;
+using rawspeed::ColorFilterArray;
+using rawspeed::CFA_RED;
+using rawspeed::CFA_GREEN;
+using rawspeed::CFA_BLUE;
+using rawspeed::CFA_CYAN;
+using rawspeed::CFA_MAGENTA;
+using rawspeed::CFA_FUJI_GREEN;
+using rawspeed::CFA_YELLOW;
 
-namespace RawSpeed {
+namespace rawspeed {
 
 ::std::ostream& operator<<(::std::ostream& os, const CFAColor c) {
   return os << ColorFilterArray::colorToString(c);
 }
 
-} // namespace RawSpeed
+} // namespace rawspeed
 
-namespace RawSpeedTest {
+namespace rawspeed_test {
 
 using Bayer2x2 = std::tr1::tuple<CFAColor, CFAColor, CFAColor, CFAColor>;
 
@@ -289,4 +299,4 @@ TEST_P(ColorFilterArrayShiftTest, shiftEqualityTest) {
   });
 }
 
-} // namespace RawSpeedTest
+} // namespace rawspeed_test

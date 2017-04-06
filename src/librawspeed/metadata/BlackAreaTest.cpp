@@ -23,10 +23,10 @@
 #include <gtest/gtest.h> // for IsNullLiteralHelper, AssertionResult, gtest_ar
 #include <memory>        // for unique_ptr
 
-using namespace std;
-using namespace RawSpeed;
+using std::unique_ptr;
+using rawspeed::BlackArea;
 
-namespace RawSpeedTest {
+namespace rawspeed_test {
 
 class BlackAreaTest
     : public ::testing::TestWithParam<std::tr1::tuple<int, int, bool>> {
@@ -201,4 +201,4 @@ TEST_P(BlackAreaTest, AssignmentGetters) {
   });
 }
 
-} // namespace RawSpeedTest
+} // namespace rawspeed_test

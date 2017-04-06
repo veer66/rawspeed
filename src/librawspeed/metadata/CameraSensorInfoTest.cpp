@@ -30,24 +30,12 @@
 #include <string>             // for string
 #include <vector>             // for vector, allocator
 
-using namespace std;
-using namespace RawSpeed;
+using std::unique_ptr;
+using rawspeed::CameraSensorInfo;
 
-namespace RawSpeedTest {
+namespace rawspeed_test {
 
 std::vector<int> ISOList(6);
-
-int main(int argc, char **argv) {
-  ISOList.push_back(0);
-
-  int n = {25};
-  std::generate(ISOList.begin() + 1, ISOList.end(), [&n] { return n *= 4; });
-
-  std::srand(2016122923);
-
-  testing::InitGoogleMock(&argc, argv);
-  return RUN_ALL_TESTS();
-}
 
 class CameraSensorInfoTestDumb
     : public ::testing::TestWithParam<std::tr1::tuple<int, int>> {
@@ -317,4 +305,17 @@ TEST_P(CameraSensorInfoTest, isIsoWithin) {
   });
 }
 
-} // namespace RawSpeedTest
+} // namespace rawspeed_test
+
+int main(int argc, char** argv) {
+  rawspeed_test::ISOList.push_back(0);
+
+  int n = {25};
+  std::generate(rawspeed_test::ISOList.begin() + 1,
+                rawspeed_test::ISOList.end(), [&n] { return n *= 4; });
+
+  std::srand(2016122923);
+
+  testing::InitGoogleMock(&argc, argv);
+  return RUN_ALL_TESTS();
+}

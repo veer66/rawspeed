@@ -23,14 +23,19 @@
 #include "common/RawspeedException.h"
 #include <string>
 
-namespace RawSpeed {
+namespace rawspeed {
 
 class FiffParserException final : public RawspeedException {
 public:
-  FiffParserException(const std::string& msg) : RawspeedException(msg) {}
-  FiffParserException(const char* msg) : RawspeedException(msg) {}
+  explicit FiffParserException(const std::string& msg)
+      : RawspeedException(msg) {}
+  explicit FiffParserException(const char* msg) : RawspeedException(msg) {}
 };
 
-#define ThrowFPE(...) ThrowExceptionHelper(FiffParserException, __VA_ARGS__)
+#define ThrowFPE(...)                                                          \
+  do {                                                                         \
+    ThrowExceptionHelper(rawspeed::FiffParserException, __VA_ARGS__);          \
+    __builtin_unreachable();                                                   \
+  } while (false)
 
-} // namespace RawSpeed
+} // namespace rawspeed

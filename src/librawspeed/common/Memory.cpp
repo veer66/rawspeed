@@ -23,7 +23,7 @@
 #include "common/Memory.h"
 
 #ifndef NDEBUG
-#include "common/Common.h" // for isPowerOfTwo
+#include "common/Common.h" // for isPowerOfTwo, isAligned
 #endif
 
 #include <cassert> // for assert
@@ -41,12 +41,12 @@ extern "C" {
 #include <cstdlib> // for posix_memalign / aligned_alloc / malloc; free
 #endif
 
-namespace RawSpeed {
+namespace rawspeed {
 
 void* alignedMalloc(size_t size, size_t alignment) {
   assert(isPowerOfTwo(alignment)); // for posix_memalign, _aligned_malloc
-  assert(((uintptr_t)alignment % sizeof(void*)) == 0); // for posix_memalign
-  assert(((uintptr_t)size % alignment) == 0);          // for aligned_alloc
+  assert(isAligned(alignment, sizeof(void*))); // for posix_memalign
+  assert(isAligned(size, alignment));          // for aligned_alloc
 
   void* ptr = nullptr;
 
@@ -78,7 +78,7 @@ void* alignedMalloc(size_t size, size_t alignment) {
   ptr = malloc(size);
 #endif
 
-  assert(((uintptr_t)ptr % alignment) == 0);
+  assert(isAligned(ptr, alignment));
 
   return ptr;
 }
@@ -93,4 +93,15 @@ void alignedFree(void* ptr) {
 #endif
 }
 
-} // Namespace RawSpeed
+void alignedFreeConstPtr(const void* ptr) {
+// an exception, specified by EXP05-C-EX1 and EXP55-CPP-EX1
+#if defined(HAVE_MM_MALLOC)
+  _mm_free(const_cast<void*>(ptr));
+#elif defined(HAVE_ALIGNED_MALLOC)
+  _aligned_free(const_cast<void*>(ptr));
+#else
+  free(const_cast<void*>(ptr));
+#endif
+}
+
+} // namespace rawspeed

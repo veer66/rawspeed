@@ -20,12 +20,13 @@
 
 #pragma once
 
-#include "common/RawImage.h"                         // for RawImage
 #include "decompressors/AbstractLJpegDecompressor.h" // for AbstractLJpegDe...
 #include "io/Buffer.h"                               // for Buffer, Buffer:...
 #include <vector>                                    // for vector
 
-namespace RawSpeed {
+namespace rawspeed {
+
+class RawImage;
 
 // Decompresses Lossless JPEGs, with 2-4 components and optional X/Y subsampling
 
@@ -48,4 +49,4 @@ public:
   void decode(std::vector<int> slicesWidths);
 };
 
-} // namespace RawSpeed
+} // namespace rawspeed

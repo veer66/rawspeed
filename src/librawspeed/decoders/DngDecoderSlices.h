@@ -32,7 +32,7 @@
 #include <pthread.h>
 #endif
 
-namespace RawSpeed {
+namespace rawspeed {
 
 class Buffer;
 
@@ -59,11 +59,12 @@ public:
 #ifdef HAVE_PTHREAD
   pthread_t threadid;
 #endif
-  DngDecoderThread(DngDecoderSlices* parent_) : parent(parent_) {}
+  explicit DngDecoderThread(DngDecoderSlices* parent_) : parent(parent_) {}
   std::queue<std::unique_ptr<DngSliceElement>> slices;
   DngDecoderSlices* parent;
 };
 
+void* DecodeThread(void* _this);
 
 class DngDecoderSlices
 {
@@ -84,4 +85,4 @@ public:
   int compression;
 };
 
-} // namespace RawSpeed
+} // namespace rawspeed

@@ -25,12 +25,13 @@
 #include "decompressors/HuffmanTable.h" // for HuffmanTable
 #include "io/BitPumpMSB.h"              // for BitPumpMSB, BitStream<>::fil...
 #include "io/Buffer.h"                  // for Buffer
+#include "io/ByteStream.h"              // for ByteStream
 #include <cstdio>                       // for size_t, NULL
 #include <vector>                       // for vector, allocator
 
-using namespace std;
+using std::vector;
 
-namespace RawSpeed {
+namespace rawspeed {
 
 const uchar8 NikonDecompressor::nikon_tree[][2][16] = {
     {/* 12-bit lossy */
@@ -155,4 +156,4 @@ void NikonDecompressor::decompress(RawImage& mRaw, ByteStream&& data,
   }
 }
 
-} // namespace RawSpeed
+} // namespace rawspeed

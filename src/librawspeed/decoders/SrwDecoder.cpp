@@ -35,14 +35,18 @@
 #include "tiff/TiffIFD.h"                 // for TiffRootIFD, TiffIFD, TiffID
 #include "tiff/TiffTag.h"                 // for TiffTag::STRIPOFFSETS, Tif...
 #include <algorithm>                      // for max
+#include <cassert>                        // for assert
 #include <memory>                         // for unique_ptr
 #include <sstream>                        // for ostringstream, operator<<
 #include <string>                         // for string
 #include <vector>                         // for vector
 
-using namespace std;
+using std::max;
+using std::vector;
+using std::string;
+using std::ostringstream;
 
-namespace RawSpeed {
+namespace rawspeed {
 
 RawImage SrwDecoder::decodeRawInternal() {
   auto raw = mRootIFD->getIFDWithTag(STRIPOFFSETS);
@@ -119,6 +123,9 @@ void SrwDecoder::decodeCompressed( const TiffIFD* raw )
     BitPumpMSB32 bits(mFile, line_offset);
     int op[4];
     auto *img = (ushort16 *)mRaw->getData(0, y);
+    const auto* const past_last =
+        (ushort16*)(mRaw->getData(width - 1, y) + mRaw->getBpp());
+
     ushort16* img_up = (ushort16*)mRaw->getData(0, max(0, (int)y - 1));
     ushort16* img_up2 = (ushort16*)mRaw->getData(0, max(0, (int)y - 2));
     // Image is arranged in groups of 16 pixels horizontally
@@ -128,12 +135,17 @@ void SrwDecoder::decodeCompressed( const TiffIFD* raw )
       for (int &i : op)
         i = bits.getBitsNoFill(2);
       for (int i = 0; i < 4; i++) {
+        assert(op[i] >= 0 && op[i] <= 3);
         switch (op[i]) {
           case 3: len[i] = bits.getBits(4);
             break;
           case 2: len[i]--;
             break;
           case 1: len[i]++;
+            break;
+          default:
+            // FIXME: it can be zero too.
+            break;
         }
         if (len[i] < 0)
           ThrowRDE("Bit length less than 0.");
@@ -169,7 +181,9 @@ void SrwDecoder::decodeCompressed( const TiffIFD* raw )
           int32 adj = 0;
           if (b)
             adj = ((int32)bits.getBits(b) << (32 - b) >> (32 - b));
-          img[c] = adj + pred_left;
+
+          if (img + c < past_last)
+            img[c] = adj + pred_left;
         }
         // Now we decode odd pixels
         pred_left = x ? img[-1] : 128;
@@ -178,7 +192,9 @@ void SrwDecoder::decodeCompressed( const TiffIFD* raw )
           int32 adj = 0;
           if (b)
             adj = ((int32)bits.getBits(b) << (32 - b) >> (32 - b));
-          img[c] = adj + pred_left;
+
+          if (img + c < past_last)
+            img[c] = adj + pred_left;
         }
       }
       img += 16;
@@ -300,9 +316,10 @@ void SrwDecoder::decodeCompressed3(const TiffIFD* raw, int bits)
   // The format includes an optimization code that sets 3 flags to change the
   // decoding parameters
   uint32 optflags = startpump.getBits(4);
-  #define OPT_SKIP 1 // Skip checking if we need differences from previous line
-  #define OPT_MV   2 // Simplify motion vector definition
-  #define OPT_QP   4 // Don't scale the diff values
+
+#define OPT_SKIP 1 // Skip checking if we need differences from previous line
+#define OPT_MV 2   // Simplify motion vector definition
+#define OPT_QP 4   // Don't scale the diff values
 
   startpump.getBits(8);  // OverlapWidth
   startpump.getBits(8);  // reserved
@@ -393,11 +410,13 @@ void SrwDecoder::decodeCompressed3(const TiffIFD* raw, int bits)
         for (uint32 i=0; i<4; i++) {
           // The color is 0-Green 1-Blue 2-Red
           uint32 colornum = (row % 2 != 0) ? i>>1 : ((i>>1)+2) % 3;
+          assert(flags[i] <= 3);
           switch(flags[i]) {
             case 0: diffBits[i] = diffBitsMode[colornum][0]; break;
             case 1: diffBits[i] = diffBitsMode[colornum][0]+1; break;
             case 2: diffBits[i] = diffBitsMode[colornum][0]-1; break;
             case 3: diffBits[i] = pump.getBits(4); break;
+            default: __builtin_unreachable(); break;
           }
           diffBitsMode[colornum][0] = diffBitsMode[colornum][1];
           diffBitsMode[colornum][1] = diffBits[i];
@@ -478,5 +497,4 @@ void SrwDecoder::decodeMetaDataInternal(const CameraMetaData* meta) {
   }
 }
 
-
-} // namespace RawSpeed
+} // namespace rawspeed

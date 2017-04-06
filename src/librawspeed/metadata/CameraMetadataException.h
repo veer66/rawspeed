@@ -24,14 +24,19 @@
 #include "common/RawspeedException.h"
 #include <string> // for string
 
-namespace RawSpeed {
+namespace rawspeed {
 
 class CameraMetadataException final : public RawspeedException {
 public:
-  CameraMetadataException(const std::string& msg) : RawspeedException(msg) {}
-  CameraMetadataException(const char* msg) : RawspeedException(msg) {}
+  explicit CameraMetadataException(const std::string& msg)
+      : RawspeedException(msg) {}
+  explicit CameraMetadataException(const char* msg) : RawspeedException(msg) {}
 };
 
-#define ThrowCME(...) ThrowExceptionHelper(CameraMetadataException, __VA_ARGS__)
+#define ThrowCME(...)                                                          \
+  do {                                                                         \
+    ThrowExceptionHelper(rawspeed::CameraMetadataException, __VA_ARGS__);      \
+    __builtin_unreachable();                                                   \
+  } while (false)
 
-} // namespace RawSpeed
+} // namespace rawspeed

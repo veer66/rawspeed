@@ -23,6 +23,7 @@
 #include "common/Common.h"                // for uint32, uchar8, writeLog
 #include "common/DngOpcodes.h"            // for DngOpcodes
 #include "common/Point.h"                 // for iPoint2D, iRectangle2D
+#include "common/RawspeedException.h"     // for RawspeedException
 #include "decoders/DngDecoderSlices.h"    // for DngDecoderSlices, DngSlice...
 #include "decoders/RawDecoderException.h" // for ThrowRDE, RawDecoderException
 #include "io/Buffer.h"                    // for Buffer
@@ -30,11 +31,11 @@
 #include "metadata/Camera.h"              // for Camera
 #include "metadata/CameraMetaData.h"      // for CameraMetaData
 #include "metadata/ColorFilterArray.h"    // for CFAColor, ColorFilterArray
-#include "parsers/TiffParserException.h"  // for TiffParserException
 #include "tiff/TiffEntry.h"               // for TiffEntry, TiffDataType::T...
 #include "tiff/TiffIFD.h"                 // for TiffIFD, TiffRootIFD, TiffID
 #include "tiff/TiffTag.h"                 // for TiffTag::UNIQUECAMERAMODEL
 #include <algorithm>                      // for move
+#include <cassert>                        // for assert
 #include <cstdio>                         // for printf
 #include <cstring>                        // for memset
 #include <map>                            // for map
@@ -43,9 +44,11 @@
 #include <string>                         // for string, operator+, basic_s...
 #include <vector>                         // for vector, allocator
 
-using namespace std;
+using std::vector;
+using std::map;
+using std::string;
 
-namespace RawSpeed {
+namespace rawspeed {
 
 DngDecoder::DngDecoder(TiffRootIFDOwner&& rootIFD, Buffer* file)
     : AbstractTiffDecoder(move(rootIFD), file) {
@@ -64,55 +67,68 @@ DngDecoder::DngDecoder(TiffRootIFDOwner&& rootIFD, Buffer* file)
 
 void DngDecoder::dropUnsuportedChunks(vector<const TiffIFD*>& data) {
   for (auto i = data.begin(); i != data.end();) {
-    int comp = (*i)->getEntry(COMPRESSION)->getU16();
+    const auto& ifd = *i;
+
+    int comp = ifd->getEntry(COMPRESSION)->getU16();
     bool isSubsampled = false;
-    try {
-      isSubsampled = (*i)->getEntry(NEWSUBFILETYPE)->getU32() &
-                     1; // bit 0 is on if image is subsampled
-    } catch (TiffParserException&) {
+    bool isAlpha = false;
+
+    if (ifd->hasEntry(NEWSUBFILETYPE) &&
+        ifd->getEntry(NEWSUBFILETYPE)->isInt()) {
+      const uint32 NewSubFileType = (*i)->getEntry(NEWSUBFILETYPE)->getU32();
+
+      // bit 0 is on if image is subsampled.
+      // the value itself can be either 1, or 0x10001.
+      // or 5 for "Transparency information for subsampled raw images"
+      isSubsampled = NewSubFileType & (1 << 0);
+
+      // bit 2 is on if image contains transparency information.
+      // the value itself can be either 4 or 5
+      isAlpha = NewSubFileType & (1 << 2);
+
+      assert((NewSubFileType == 0) || isSubsampled || isAlpha);
     }
 
-    // subsampled ?
-    if (isSubsampled) {
-      i = data.erase(i);
-      continue;
-    }
+    // normal raw?
+    bool supported = !isSubsampled && !isAlpha;
 
     switch (comp) {
     case 1: // uncompressed
-      ++i;
-      break;
     case 7: // lossless JPEG
-      ++i;
-      break;
-    case 8: // deflate
 #ifdef HAVE_ZLIB
-      ++i;
-#else
+    case 8: // deflate
+#endif
+#ifdef HAVE_JPEG
+    case 0x884c: // lossy JPEG
+#endif
+      // no change, if supported, then is still supported.
+      break;
+
+#ifndef HAVE_ZLIB
+    case 8: // deflate
 #pragma message                                                                \
     "ZLIB is not present! Deflate compression will not be supported!"
-      i = data.erase(i);
       writeLog(DEBUG_PRIO_WARNING, "DNG Decoder: found Deflate-encoded chunk, "
                                    "but the deflate support was disabled at "
                                    "build!");
 #endif
-      break;
+#ifndef HAVE_JPEG
     case 0x884c: // lossy JPEG
-#ifdef HAVE_JPEG
-      ++i;
-#else
 #pragma message                                                                \
     "JPEG is not present! Lossy JPEG compression will not be supported!"
-      i = data.erase(i);
       writeLog(DEBUG_PRIO_WARNING, "DNG Decoder: found lossy JPEG-encoded "
                                    "chunk, but the jpeg support was "
                                    "disabled at build!");
 #endif
-      break;
     default:
-      i = data.erase(i);
+      supported = false;
       break;
     }
+
+    if (supported)
+      ++i;
+    else
+      i = data.erase(i);
   }
 }
 
@@ -130,9 +146,9 @@ void DngDecoder::parseCFA(const TiffIFD* raw) {
   // Does NOT contain dimensions as some documents state
   TiffEntry* cPat = raw->getEntry(CFAPATTERN);
 
+  // Map from the order in the image, to the position in the CFA
   /*
   if (raw->hasEntry(CFAPLANECOLOR)) {
-    // Map from the order in the image, to the position in the CFA
     TiffEntry* e = raw->getEntry(CFAPLANECOLOR);
 
     const unsigned char* cPlaneOrder = e->getData();
@@ -189,16 +205,24 @@ void DngDecoder::decodeData(const TiffIFD* raw, int compression, uint32 sample_f
     uint32 predictor = raw->getEntry(PREDICTOR)->getU32();
     slices.mPredictor = predictor;
   }
-  slices.mBps = raw->getEntry(BITSPERSAMPLE)->getU32();
+  slices.mBps = bps;
   if (raw->hasEntry(TILEOFFSETS)) {
     uint32 tilew = raw->getEntry(TILEWIDTH)->getU32();
     uint32 tileh = raw->getEntry(TILELENGTH)->getU32();
-    if (!tilew || !tileh)
-      ThrowRDE("Invalid tile size");
 
+    if (!(tilew > 0 && tileh > 0))
+      ThrowRDE("Invalid tile size: (%u, %u)", tilew, tileh);
+
+    assert(tilew > 0);
     uint32 tilesX = (mRaw->dim.x + tilew - 1) / tilew;
+    assert(tilesX > 0);
+
+    assert(tileh > 0);
     uint32 tilesY = (mRaw->dim.y + tileh - 1) / tileh;
+    assert(tilesY > 0);
+
     uint32 nTiles = tilesX * tilesY;
+    assert(nTiles > 0);
 
     TiffEntry* offsets = raw->getEntry(TILEOFFSETS);
     TiffEntry* counts = raw->getEntry(TILEBYTECOUNTS);
@@ -212,10 +236,22 @@ void DngDecoder::decodeData(const TiffIFD* raw, int compression, uint32 sample_f
 
     for (uint32 y = 0; y < tilesY; y++) {
       for (uint32 x = 0; x < tilesX; x++) {
-        auto e = make_unique<DngSliceElement>(
-            offsets->getU32(x + y * tilesX), counts->getU32(x + y * tilesX),
-            tilew * x, tileh * y, tilew, tileh);
-        slices.addSlice(move(e));
+        const auto s = x + y * tilesX;
+        const auto offset = offsets->getU32(s);
+        const auto count = counts->getU32(s);
+
+        if (count < 1)
+          continue;
+
+        const uint32 offX = tilew * x;
+        const uint32 offY = tileh * y;
+
+        auto e = make_unique<DngSliceElement>(offset, count, offX, offY, tilew,
+                                              tileh);
+
+        // Only decode if size is valid
+        if (mFile->isValid(e->byteOffset, e->byteCount))
+          slices.addSlice(move(e));
       }
     }
   } else { // Strips
@@ -236,13 +272,19 @@ void DngDecoder::decodeData(const TiffIFD* raw, int compression, uint32 sample_f
 
     uint32 offY = 0;
     for (uint32 s = 0; s < counts->count; s++) {
-      auto e =
-          make_unique<DngSliceElement>(offsets->getU32(s), counts->getU32(s), 0,
-                                       offY, mRaw->dim.x, yPerSlice);
+      const auto offset = offsets->getU32(s);
+      const auto count = counts->getU32(s);
+
+      if (count < 1)
+        continue;
+
+      auto e = make_unique<DngSliceElement>(offset, count, 0, offY, mRaw->dim.x,
+                                            yPerSlice);
+
       offY += yPerSlice;
 
-      if (mFile->isValid(e->byteOffset,
-                         e->byteCount)) // Only decode if size is valid
+      // Only decode if size is valid
+      if (mFile->isValid(e->byteOffset, e->byteCount))
         slices.addSlice(move(e));
     }
   }
@@ -276,7 +318,10 @@ RawImage DngDecoder::decodeRawInternal() {
   }
 
   const TiffIFD* raw = data[0];
-  uint32 bps = raw->getEntry(BITSPERSAMPLE)->getU32();
+
+  bps = raw->getEntry(BITSPERSAMPLE)->getU32();
+  if (bps < 1 || bps > 32)
+    ThrowRDE("Unsupported bit per sample count: %u.", bps);
 
   uint32 sample_format = 1;
   if (raw->hasEntry(SAMPLEFORMAT))
@@ -319,8 +364,8 @@ RawImage DngDecoder::decodeRawInternal() {
 
   uint32 cpp = raw->getEntry(SAMPLESPERPIXEL)->getU32();
 
-  if (cpp > 4)
-    ThrowRDE("More than 4 samples per pixel is not supported.");
+  if (cpp < 1 || cpp > 4)
+    ThrowRDE("Unsupported samples per pixel count: %u.", cpp);
 
   mRaw->setCpp(cpp);
 
@@ -408,7 +453,7 @@ RawImage DngDecoder::decodeRawInternal() {
   }
 
  // Default white level is (2 ** BitsPerSample) - 1
-  mRaw->whitePoint = (1UL << raw->getEntry(BITSPERSAMPLE)->getU16()) - 1UL;
+  mRaw->whitePoint = (1UL << bps) - 1UL;
 
   if (raw->hasEntry(WHITELEVEL)) {
     TiffEntry *whitelevel = raw->getEntry(WHITELEVEL);
@@ -450,7 +495,8 @@ void DngDecoder::decodeMetaDataInternal(const CameraMetaData* meta) {
 
   try {
     id = mRootIFD->getID();
-  } catch (...) {
+  } catch (RawspeedException& e) {
+    mRaw->setError(e.what());
     // not all dngs have MAKE/MODEL entries,
     // will be dealt with by using UNIQUECAMERAMODEL below
   }
@@ -483,8 +529,10 @@ void DngDecoder::decodeMetaDataInternal(const CameraMetaData* meta) {
   if (mRootIFD->hasEntryRecursive(ASSHOTNEUTRAL)) {
     TiffEntry* as_shot_neutral = mRootIFD->getEntryRecursive(ASSHOTNEUTRAL);
     if (as_shot_neutral->count == 3) {
-      for (uint32 i = 0; i < 3; i++)
-        mRaw->metadata.wbCoeffs[i] = 1.0f / as_shot_neutral->getFloat(i);
+      for (uint32 i = 0; i < 3; i++) {
+        float c = as_shot_neutral->getFloat(i);
+        mRaw->metadata.wbCoeffs[i] = (c > 0.0f) ? (1.0f / c) : 0.0f;
+      }
     }
   } else if (mRootIFD->hasEntryRecursive(ASSHOTWHITEXY)) {
     TiffEntry* as_shot_white_xy = mRootIFD->getEntryRecursive(ASSHOTWHITEXY);
@@ -628,4 +676,4 @@ void DngDecoder::setBlack(const TiffIFD* raw) {
   if (raw->hasEntry(BLACKLEVEL))
     decodeBlackLevels(raw);
 }
-} // namespace RawSpeed
+} // namespace rawspeed

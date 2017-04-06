@@ -32,7 +32,7 @@
 #include <string>                        // for string
 #include <vector>                        // for vector
 
-namespace RawSpeed {
+namespace rawspeed {
 
 class TiffEntry;
 
@@ -55,10 +55,6 @@ class TiffIFD
   friend class FiffParser;
   friend class TiffParser;
 
-  // make sure we never copy-constuct/assign a TiffIFD to keep the owning subcontainers contents save
-  TiffIFD(const TiffIFD &) = delete;            // NOLINT
-  TiffIFD &operator=(const TiffIFD &) = delete; // NOLINT
-
   void checkOverflow();
   void add(TiffIFDOwner subIFD);
   void add(TiffEntryOwner entry);
@@ -70,6 +66,11 @@ public:
   TiffIFD() = default;
   TiffIFD(TiffIFD* parent, const DataBuffer& data, uint32 offset);
   virtual ~TiffIFD() = default;
+
+  // make sure we never copy-constuct/assign a TiffIFD to keep the owning
+  // subcontainers contents save
+  TiffIFD(const TiffIFD&) = delete;
+  TiffIFD& operator=(const TiffIFD&) = delete;
 
   uint32 getNextIFD() const {return nextIFD;}
   std::vector<const TiffIFD*> getIFDsWithTag(TiffTag tag) const;
@@ -113,7 +114,7 @@ inline bool isTiffInNativeByteOrder(const ByteStream& bs, uint32 pos, const char
 }
 
 inline Endianness getTiffEndianness(const Buffer* file) {
-  ushort16 magic = *(ushort16*)file->getData(0, 2);
+  ushort16 magic = *(const ushort16*)file->getData(0, 2);
   if (magic == 0x4949)
     return little;
   if (magic == 0x4d4d)
@@ -122,4 +123,4 @@ inline Endianness getTiffEndianness(const Buffer* file) {
   ThrowTPE("Failed to parse TIFF endianess information.");
 }
 
-} // namespace RawSpeed
+} // namespace rawspeed

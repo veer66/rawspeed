@@ -29,14 +29,12 @@
 #include <stdexcept>                                // for out_of_range
 #include <string>                                   // for string, basic_st...
 
-namespace RawSpeed {
+using std::map;
+using std::string;
+
+namespace rawspeed {
+
 class Buffer;
-} // namespace RawSpeed
-
-using namespace std;
-
-namespace RawSpeed {
-
 class CameraMetaData;
 
 NakedDecoder::NakedDecoder(Buffer* file, const Camera* c)
@@ -83,7 +81,7 @@ RawImage NakedDecoder::decodeRawInternal() {
   mRaw->dim = iPoint2D(width, height);
   mRaw->createData();
 
-  UncompressedDecompressor u(*mFile, offset, mRaw, uncorrectedRawValues);
+  UncompressedDecompressor u(*mFile, offset, mRaw);
 
   iPoint2D pos(0, 0);
   u.readUncompressedRaw(mRaw->dim, pos, width * bits / 8, bits, bo);
@@ -99,4 +97,4 @@ void NakedDecoder::decodeMetaDataInternal(const CameraMetaData* meta) {
   setMetaData(meta, cam->make, cam->model, cam->mode, 0);
 }
 
-} // namespace RawSpeed
+} // namespace rawspeed

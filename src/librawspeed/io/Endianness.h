@@ -24,8 +24,9 @@
 #include "common/Common.h" // for uint32, ushort16, uint64, int32, short16
 #include <cassert>         // for assert
 #include <cstring>         // for memcpy
+// IWYU pragma: no_include "io/EndiannessTest.h"
 
-namespace RawSpeed {
+namespace rawspeed {
 
 enum Endianness { big, little, unknown };
 
@@ -122,4 +123,4 @@ inline uint32 getU32LE(const void* data) { return getLE<uint32>(data); }
 #undef BSWAP32
 #undef BSWAP16
 
-} // namespace RawSpeed
+} // namespace rawspeed

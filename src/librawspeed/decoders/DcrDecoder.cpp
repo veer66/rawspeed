@@ -30,12 +30,13 @@
 #include "tiff/TiffEntry.h"               // for TiffEntry, TiffDataType::T...
 #include "tiff/TiffIFD.h"                 // for TiffRootIFD, TiffIFD
 #include "tiff/TiffTag.h"                 // for TiffTag, TiffTag::CFAPATTERN
+#include <cassert>                        // for assert
 #include <memory>                         // for unique_ptr
 #include <vector>                         // for vector
 
-using namespace std;
+using std::min;
 
-namespace RawSpeed {
+namespace rawspeed {
 
 class CameraMetaData;
 
@@ -62,13 +63,17 @@ RawImage DcrDecoder::decodeRawInternal() {
     TiffEntry *ifdoffset = mRootIFD->getEntryRecursive(KODAK_IFD);
     if (!ifdoffset)
       ThrowRDE("Couldn't find the Kodak IFD offset");
+
+    assert(ifdoffset != nullptr);
     TiffRootIFD kodakifd(nullptr, ifdoffset->getRootIfdData(),
                          ifdoffset->getU32());
-    TiffEntry *linearization = kodakifd.getEntryRecursive(KODAK_LINEARIZATION);
-    if (!linearization || linearization->count != 1024 || linearization->type != TIFF_SHORT) {
-      ThrowRDE("Couldn't find the linearization table");
-    }
 
+    TiffEntry *linearization = kodakifd.getEntryRecursive(KODAK_LINEARIZATION);
+    if (!linearization || linearization->count != 1024 ||
+        linearization->type != TIFF_SHORT)
+      ThrowRDE("Couldn't find the linearization table");
+
+    assert(linearization != nullptr);
     auto linTable = linearization->getU16Array(1024);
 
     if (!uncorrectedRawValues)
@@ -164,4 +169,4 @@ void DcrDecoder::decodeMetaDataInternal(const CameraMetaData* meta) {
   setMetaData(meta, "", 0);
 }
 
-} // namespace RawSpeed
+} // namespace rawspeed

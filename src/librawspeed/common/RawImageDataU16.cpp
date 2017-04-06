@@ -26,16 +26,21 @@
 #include "metadata/BlackArea.h"           // for BlackArea
 #include <algorithm>                      // for fill, max, min
 #include <array>                          // for array
+#include <cassert>                        // for assert
 #include <vector>                         // for vector
 
 #if defined(__SSE2__)
+#include "common/Cpuid.h" // for Cpuid
 #include <emmintrin.h> // for __m128i, _mm_load_si128
 #include <xmmintrin.h> // for _MM_HINT_T0, _mm_prefetch
 #endif
 
-using namespace std;
+using std::vector;
+using std::min;
+using std::max;
+using std::array;
 
-namespace RawSpeed {
+namespace rawspeed {
 
 RawImageDataU16::RawImageDataU16() {
   dataType = TYPE_USHORT16;
@@ -155,26 +160,17 @@ void RawImageDataU16::scaleBlackWhite() {
 }
 
 void RawImageDataU16::scaleValues(int start_y, int end_y) {
-#if !(_MSC_VER > 1399 || defined(__SSE2__))
+#if !((defined(_MSC_VER) && _MSC_VER > 1399) || defined(__SSE2__))
 
   return scaleValues_plain(start_y, end_y);
 
 #else
 
-  bool use_sse2;
-#ifdef _MSC_VER
-  int info[4];
-  __cpuid(info, 1);
-  use_sse2 = !!(info[3]&(1 << 26));
-#else
-  use_sse2 = true;
-#endif
-
   int depth_values = whitePoint - blackLevelSeparate[0];
   float app_scale = 65535.0f / depth_values;
 
   // Check SSE2
-  if (use_sse2 && app_scale < 63) {
+  if (Cpuid::SSE2() && app_scale < 63) {
     scaleValues_SSE2(start_y, end_y);
   } else {
     scaleValues_plain(start_y, end_y);
@@ -183,7 +179,7 @@ void RawImageDataU16::scaleValues(int start_y, int end_y) {
 #endif
 }
 
-#if _MSC_VER > 1399 || defined(__SSE2__)
+#if (defined(_MSC_VER) && _MSC_VER > 1399) || defined(__SSE2__)
 void RawImageDataU16::scaleValues_SSE2(int start_y, int end_y) {
   int depth_values = whitePoint - blackLevelSeparate[0];
   float app_scale = 65535.0f / depth_values;
@@ -201,9 +197,12 @@ void RawImageDataU16::scaleValues_SSE2(int start_y, int end_y) {
   __m128i sse_full_scale_fp;
   __m128i sse_half_scale_fp;
 
-  auto* sub_mul = (uint32*)alignedMallocArray<16, __m128i>(4);
+  auto* sub_mul = alignedMallocArray<uint32, 16, __m128i>(4);
   if (!sub_mul)
     ThrowRDE("Out of memory, failed to allocate 128 bytes");
+
+  assert(sub_mul != nullptr);
+
   uint32 gw = pitch / 16;
   // 10 bit fraction
   uint32 mul = (int)(1024.0f * 65535.0f /
@@ -490,4 +489,4 @@ void RawImageDataU16::doLookup( int start_y, int end_y )
   ThrowRDE("Table lookup with multiple components not implemented");
 }
 
-} // namespace RawSpeed
+} // namespace rawspeed

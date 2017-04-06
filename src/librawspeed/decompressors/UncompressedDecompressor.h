@@ -3,7 +3,7 @@
 
     Copyright (C) 2009-2014 Klaus Post
     Copyright (C) 2014 Pedro Côrte-Real
-    Copyright (C) 2016 Roman Lebedev
+    Copyright (C) 2016-2017 Roman Lebedev
 
     This library is free software; you can redistribute it and/or
     modify it under the terms of the GNU Lesser General Public
@@ -27,29 +27,34 @@
 #include "decompressors/AbstractDecompressor.h" // for AbstractDecompressor
 #include "io/Buffer.h"                          // for Buffer, Buffer::size_type
 #include "io/ByteStream.h"                      // for ByteStream
+#include "io/Endianness.h"                      // for Endianness
 #include <algorithm>                            // for move
 
-namespace RawSpeed {
+namespace rawspeed {
 
 class iPoint2D;
 
 class UncompressedDecompressor final : public AbstractDecompressor {
+  // check buffer size, throw, or compute minimal height that can be decoded
+  void sanityCheck(uint32* h, int bpl);
+
+  // check buffer size, throw, or compute minimal height that can be decoded
+  void sanityCheck(uint32 w, uint32* h, int bpp);
+
+  // for special packed formats
+  int bytesPerLine(int w, bool skips);
+
 public:
-  UncompressedDecompressor(ByteStream input_, const RawImage& img,
-                           bool uncorrectedRawValues_)
-      : input(std::move(input_)), mRaw(img),
-        uncorrectedRawValues(uncorrectedRawValues_) {}
+  UncompressedDecompressor(ByteStream input_, const RawImage& img)
+      : input(std::move(input_)), mRaw(img) {}
 
   UncompressedDecompressor(const Buffer& data, Buffer::size_type offset,
-                           Buffer::size_type size, const RawImage& img,
-                           bool uncorrectedRawValues_)
-      : UncompressedDecompressor(ByteStream(data, offset, size), img,
-                                 uncorrectedRawValues_) {}
+                           Buffer::size_type size, const RawImage& img)
+      : UncompressedDecompressor(ByteStream(data, offset, size), img) {}
 
   UncompressedDecompressor(const Buffer& data, Buffer::size_type offset,
-                           const RawImage& img, bool uncorrectedRawValues_)
-      : UncompressedDecompressor(data, offset, data.getSize() - offset, img,
-                                 uncorrectedRawValues_) {}
+                           const RawImage& img)
+      : UncompressedDecompressor(data, offset, data.getSize() - offset, img) {}
 
   /* Helper function for decoders, that will unpack uncompressed image data */
   /* input: Input image, positioned at first pixel */
@@ -62,48 +67,25 @@ public:
                            int bitPerPixel, BitOrder order);
 
   /* Faster versions for unpacking 8 bit data */
-  void decode8BitRaw(uint32 w, uint32 h);
+  template <bool uncorrectedRawValues> void decode8BitRaw(uint32 w, uint32 h);
 
-  /* Faster version for unpacking 12 bit LSB data */
+  /* Faster version for unpacking 12 bit data */
+  /* interlaced - is data with interlaced lines ? */
+  /* skips - is there control byte every 10 pixels ? */
+  template <Endianness e, bool interlaced = false, bool skips = false>
   void decode12BitRaw(uint32 w, uint32 h);
 
-  /* Faster version for unpacking 12 bit LSB data with a control byte every 10
-   * pixels */
-  void decode12BitRawWithControl(uint32 w, uint32 h);
-
-  /* Faster version for unpacking 12 bit MSB data with a control byte every 10
-   * pixels */
-  void decode12BitRawBEWithControl(uint32 w, uint32 h);
-
-  /* Faster version for unpacking 12 bit MSB data */
-  void decode12BitRawBE(uint32 w, uint32 h);
-
-  /* Faster version for unpacking 12 bit MSB data with interlaced lines */
-  void decode12BitRawBEInterlaced(uint32 w, uint32 h);
-
-  /* Faster version for reading unpacked 12 bit MSB data */
-  void decode12BitRawBEunpacked(uint32 w, uint32 h);
-
-  /* Faster version for reading unpacked 12 bit MSB data that is left aligned
+  /* Faster version for reading unpacked 12 bit data that is left aligned
    * (needs >> 4 shift) */
-  void decode12BitRawBEunpackedLeftAligned(uint32 w, uint32 h);
+  template <Endianness e>
+  void decode12BitRawUnpackedLeftAligned(uint32 w, uint32 h);
 
-  /* Faster version for reading unpacked 14 bit MSB data */
-  void decode14BitRawBEunpacked(uint32 w, uint32 h);
-
-  /* Faster version for reading unpacked 16 bit LSB data */
-  void decode16BitRawUnpacked(uint32 w, uint32 h);
-
-  /* Faster version for reading unpacked 16 bit MSB data */
-  void decode16BitRawBEunpacked(uint32 w, uint32 h);
-
-  /* Faster version for reading unpacked 12 bit LSB data */
-  void decode12BitRawUnpacked(uint32 w, uint32 h);
+  /* Faster version for reading unpacked data */
+  template <int bits, Endianness e> void decodeRawUnpacked(uint32 w, uint32 h);
 
 protected:
   ByteStream input;
   RawImage mRaw;
-  bool uncorrectedRawValues;
 };
 
-} // namespace RawSpeed
+} // namespace rawspeed

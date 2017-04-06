@@ -26,7 +26,7 @@
 #include <string>          // for string
 #include <vector>          // for vector
 
-namespace RawSpeed {
+namespace rawspeed {
 
 enum CFAColor {
   // see also DngDecoder
@@ -48,7 +48,7 @@ class ColorFilterArray
 
 public:
   ColorFilterArray() = default;
-  ColorFilterArray(const iPoint2D& size);
+  explicit ColorFilterArray(const iPoint2D& size);
 
   void setSize(const iPoint2D& size);
   void setColorAt(iPoint2D pos, CFAColor c);
@@ -73,4 +73,4 @@ protected:
 // number for that given position in the CFA pattern
 // #define FC(filters,row,col) ((filters) >> ((((row) << 1 & 14) + ((col) & 1)) << 1) & 3)
 
-} // namespace RawSpeed
+} // namespace rawspeed

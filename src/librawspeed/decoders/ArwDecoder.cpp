@@ -22,6 +22,7 @@
 #include "decoders/ArwDecoder.h"
 #include "common/Common.h"                          // for uint32, uchar8
 #include "common/Point.h"                           // for iPoint2D
+#include "common/RawspeedException.h"               // for RawspeedException
 #include "decoders/RawDecoder.h"                    // for RawDecoderThread
 #include "decoders/RawDecoderException.h"           // for RawDecoderExcept...
 #include "decompressors/HuffmanTable.h"             // for HuffmanTable
@@ -39,14 +40,15 @@
 #include "tiff/TiffTag.h"                           // for TiffTag::DNGPRIV...
 #include <cassert>                                  // for assert
 #include <cstring>                                  // for memcpy, size_t
-#include <exception>                                // for exception
 #include <memory>                                   // for unique_ptr
 #include <string>                                   // for operator==, basi...
 #include <vector>                                   // for vector
 
-using namespace std;
+using std::vector;
+using std::string;
+using std::max;
 
-namespace RawSpeed {
+namespace rawspeed {
 
 RawImage ArwDecoder::decodeRawInternal() {
   const TiffIFD* raw = nullptr;
@@ -98,15 +100,15 @@ RawImage ArwDecoder::decodeRawInternal() {
       static const size_t head_size = 40;
       const uchar8* head_orig = mFile->getData(head_off, head_size);
       vector<uchar8> head(head_size);
-      SonyDecrypt((uint32*)head_orig, (uint32*)&head[0], 10, key);
+      SonyDecrypt((const uint32*)head_orig, (uint32*)&head[0], 10, key);
       for (int i=26; i-- > 22; )
         key = key << 8 | head[i];
 
       // "Decrypt" the whole image buffer
       auto image_data = mFile->getData(off, len);
       auto image_decoded = Buffer::Create(len);
-      SonyDecrypt((uint32*)image_data, (uint32*)image_decoded.get(), len / 4,
-                  key);
+      SonyDecrypt((const uint32*)image_data, (uint32*)image_decoded.get(),
+                  len / 4, key);
 
       Buffer di(move(image_decoded), len);
 
@@ -114,8 +116,8 @@ RawImage ArwDecoder::decodeRawInternal() {
       mRaw->dim = iPoint2D(width, height);
       mRaw->createData();
 
-      UncompressedDecompressor u(di, 0, len, mRaw, uncorrectedRawValues);
-      u.decode16BitRawBEunpacked(width, height);
+      UncompressedDecompressor u(di, 0, len, mRaw);
+      u.decodeRawUnpacked<16, big>(width, height);
 
       return mRaw;
     }
@@ -233,12 +235,12 @@ void ArwDecoder::DecodeUncompressed(const TiffIFD* raw) {
   mRaw->dim = iPoint2D(width, height);
   mRaw->createData();
 
-  UncompressedDecompressor u(*mFile, off, c2, mRaw, uncorrectedRawValues);
+  UncompressedDecompressor u(*mFile, off, c2, mRaw);
 
   if (hints.has("sr2_format"))
-    u.decode14BitRawBEunpacked(width, height);
+    u.decodeRawUnpacked<14, big>(width, height);
   else
-    u.decode16BitRawUnpacked(width, height);
+    u.decodeRawUnpacked<16, little>(width, height);
 }
 
 void ArwDecoder::DecodeARW(ByteStream &input, uint32 w, uint32 h) {
@@ -346,14 +348,14 @@ void ArwDecoder::decodeMetaDataInternal(const CameraMetaData* meta) {
   } else { // Everything else but the A100
     try {
       GetWB();
-    } catch (const std::exception& e) {
+    } catch (RawspeedException& e) {
       mRaw->setError(e.what());
       // We caught an exception reading WB, just ignore it
     }
   }
 }
 
-void ArwDecoder::SonyDecrypt(uint32* ibuf, uint32* obuf, uint32 len,
+void ArwDecoder::SonyDecrypt(const uint32* ibuf, uint32* obuf, uint32 len,
                              uint32 key) {
   if (0 == len)
     return;
@@ -390,13 +392,6 @@ void ArwDecoder::SonyDecrypt(uint32* ibuf, uint32* obuf, uint32 len,
   }
 }
 
-void ArwDecoder::SonyDecrypt(uint32* buffer, uint32 len, uint32 key) {
-  if (0 == len)
-    return;
-
-  return SonyDecrypt(buffer, buffer, len, key);
-}
-
 void ArwDecoder::GetWB() {
   // Set the whitebalance for all the modern ARW formats (everything after A100)
   if (mRootIFD->hasEntryRecursive(DNGPRIVATEDATA)) {
@@ -409,8 +404,13 @@ void ArwDecoder::GetWB() {
     if(!sony_offset || !sony_length || !sony_key || sony_key->count != 4)
       ThrowRDE("couldn't find the correct metadata for WB decoding");
 
+    assert(sony_offset != nullptr);
     uint32 off = sony_offset->getU32();
+
+    assert(sony_length != nullptr);
     uint32 len = sony_length->getU32();
+
+    assert(sony_key != nullptr);
     uint32 key = getU32LE(sony_key->getData(4));
 
     // "Decrypt" IFD
@@ -419,7 +419,7 @@ void ArwDecoder::GetWB() {
     auto ifd_decoded = Buffer::Create(ifd_size);
     memcpy(ifd_decoded.get(), ifd_crypt.begin(), ifd_size);
 
-    SonyDecrypt((uint32*)(ifd_crypt.getData(off, len)),
+    SonyDecrypt((const uint32*)(ifd_crypt.getData(off, len)),
                 (uint32*)(ifd_decoded.get() + off), len / 4, key);
 
     Buffer decIFD(move(ifd_decoded), ifd_size);
@@ -486,4 +486,4 @@ void ArwDecoder::decodeThreaded(RawDecoderThread * t) {
   }
 }
 
-} // namespace RawSpeed
+} // namespace rawspeed

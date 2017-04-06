@@ -30,9 +30,11 @@
 #include <string>                        // for string, allocator
 #include <vector>                        // for vector
 
-using namespace std;
+using std::numeric_limits;
+using std::string;
+using std::vector;
 
-namespace RawSpeed {
+namespace rawspeed {
 
 CiffEntry::CiffEntry(Buffer* f, uint32 value_data, uint32 offset) {
   own_data = nullptr;
@@ -75,8 +77,9 @@ uint32 __attribute__((pure)) CiffEntry::getElementShift() {
     case CIFF_SUB1:
     case CIFF_SUB2:
       return 2;
+    default:
+      return 0;
   }
-  return 0;
 }
 
 uint32 __attribute__((pure)) CiffEntry::getElementSize() {
@@ -91,8 +94,9 @@ uint32 __attribute__((pure)) CiffEntry::getElementSize() {
     case CIFF_SUB1:
     case CIFF_SUB2:
       return 4;
+    default:
+      return 0;
   }
-  return 0;
 }
 
 bool __attribute__((pure)) CiffEntry::isInt() {
@@ -140,11 +144,16 @@ uchar8 CiffEntry::getByte(uint32 num) {
 string CiffEntry::getString() {
   if (type != CIFF_ASCII)
     ThrowCPE("Wrong type 0x%x encountered. Expected Ascii", type);
+
+  if (count == 0)
+    return string("");
+
   if (!own_data) {
     own_data = new uchar8[count];
     memcpy(own_data, data, count);
     own_data[count-1] = 0;  // Ensure string is not larger than count defines
   }
+
   return string((const char*)&own_data[0]);
 }
 
@@ -215,4 +224,4 @@ std::string CiffEntry::getValueAsString()
   return ret;
 }
 
-} // namespace RawSpeed
+} // namespace rawspeed

@@ -26,11 +26,12 @@
 #include "decoders/RawDecoder.h" // for RawDecoder, RawDecoderThread (ptr o...
 #include "io/BitPumpMSB.h"       // for BitPumpMSB
 #include "parsers/X3fParser.h"   // for X3fPropertyCollection, X3fDirectory
+#include <array>                 // for array
 #include <map>                   // for map, _Rb_tree_iterator
 #include <string>                // for string
 #include <vector>                // for vector
 
-namespace RawSpeed {
+namespace rawspeed {
 
 class ByteStream;
 class CameraMetaData;
@@ -38,7 +39,7 @@ class Buffer;
 
 class X3fDecoder final : public RawDecoder {
 public:
-  X3fDecoder(Buffer* file);
+  explicit X3fDecoder(Buffer* file);
   ~X3fDecoder() override;
   RawImage decodeRawInternal() override;
   void decodeMetaDataInternal(const CameraMetaData* meta) override;
@@ -73,10 +74,10 @@ protected:
   int32 big_table[1<<14];
   uint32* line_offsets = nullptr;
   ushort16* huge_table = nullptr;
-  short curve[1024];
+  std::array<short, 1024> curve;
   uint32 max_len = 0;
   std::string camera_make;
   std::string camera_model;
 };
 
-} // namespace RawSpeed
+} // namespace rawspeed

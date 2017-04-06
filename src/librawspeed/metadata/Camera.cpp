@@ -31,11 +31,12 @@
 #include <string>                             // for string, allocator, ope...
 #include <vector>                             // for vector
 
-using namespace std;
+using std::vector;
+using std::string;
+using std::map;
+using pugi::xml_node;
 
-namespace RawSpeed {
-
-using namespace pugi;
+namespace rawspeed {
 
 Camera::Camera(pugi::xml_node &camera) : cfa(iPoint2D(0,0)) {
   make = canonical_make = camera.attribute("make").as_string();
@@ -253,15 +254,10 @@ void Camera::parseSensor(const xml_node &cur) {
   if (name(cur) != "Sensor")
     ThrowCME("Not an Sensor node!");
 
-  auto stringToListOfInts = [this, &cur](const char *attribute) {
+  auto stringToListOfInts = [&cur](const char* attribute) {
     vector<int> ret;
-    try {
-      for (const string& s : splitString(cur.attribute(attribute).as_string()))
-        ret.push_back(stoi(s));
-    } catch (...) {
-      ThrowCME("Error parsing attribute %s in tag %s, in camera %s %s.",
-               attribute, cur.name(), make.c_str(), model.c_str());
-    }
+    for (const string& s : splitString(cur.attribute(attribute).as_string()))
+      ret.push_back(stoi(s));
     return ret;
   };
 
@@ -327,4 +323,4 @@ const CameraSensorInfo* Camera::getSensorInfo(int iso) const {
   return candidates.front();
 }
 
-} // namespace RawSpeed
+} // namespace rawspeed

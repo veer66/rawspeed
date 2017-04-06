@@ -33,7 +33,7 @@
 #include <pthread.h>
 #endif
 
-namespace RawSpeed {
+namespace rawspeed {
 
 class RawImage;
 
@@ -64,6 +64,8 @@ protected:
   int start_y;
   int end_y;
 };
+
+void* RawImageWorkerThread(void* _this);
 
 class TableLookUp {
 public:
@@ -118,10 +120,12 @@ public:
   uint32 getBpp() const { return bpp; }
   void setCpp(uint32 val);
   void createData();
+  void poisonPadding();
+  void unpoisonPadding();
   void destroyData();
   void blitFrom(const RawImage& src, const iPoint2D& srcPos,
                 const iPoint2D& size, const iPoint2D& destPos);
-  RawSpeed::RawImageType getDataType() const { return dataType; }
+  rawspeed::RawImageType getDataType() const { return dataType; }
   uchar8* getData();
   uchar8* getData(uint32 x, uint32 y);    // Not super fast, but safe. Don't use per pixel.
   uchar8* getDataUncropped(uint32 x, uint32 y);
@@ -144,6 +148,11 @@ public:
   void createBadPixelMap();
   iPoint2D dim;
   uint32 pitch = 0;
+
+  // padding is the size of the area after last pixel of line n
+  // and before the first pixel of line n+1
+  uint32 padding = 0;
+
   bool isCFA{true};
   ColorFilterArray cfa;
   int blackLevel = -1;
@@ -198,7 +207,7 @@ public:
 
 protected:
   void scaleValues_plain(int start_y, int end_y);
-#if _MSC_VER > 1399 || defined(__SSE2__)
+#if (defined(_MSC_VER) && _MSC_VER > 1399) || defined(__SSE2__)
   void scaleValues_SSE2(int start_y, int end_y);
 #endif
   void scaleValues(int start_y, int end_y) override;
@@ -206,7 +215,7 @@ protected:
   void doLookup(int start_y, int end_y) override;
 
   RawImageDataU16();
-  RawImageDataU16(const iPoint2D &dim, uint32 cpp = 1);
+  explicit RawImageDataU16(const iPoint2D& dim, uint32 cpp = 1);
   friend class RawImage;
 };
 
@@ -221,7 +230,7 @@ protected:
   void fixBadPixel(uint32 x, uint32 y, int component = 0) override;
   [[noreturn]] void doLookup(int start_y, int end_y) override;
   RawImageDataFloat();
-  RawImageDataFloat(const iPoint2D &dim, uint32 cpp = 1);
+  explicit RawImageDataFloat(const iPoint2D& dim, uint32 cpp = 1);
   friend class RawImage;
 };
 
@@ -233,8 +242,8 @@ protected:
                           uint32 componentsPerPixel = 1);
    RawImageData* operator->() const { return p_; }
    RawImageData& operator*() const { return *p_; }
-   RawImage(RawImageData* p);  // p must not be NULL
-  ~RawImage();
+   explicit RawImage(RawImageData* p); // p must not be NULL
+   ~RawImage();
    RawImage(const RawImage& p);
    RawImage& operator=(const RawImage& p) noexcept;
    RawImage& operator=(RawImage&& p) noexcept;
@@ -248,24 +257,24 @@ inline RawImage RawImage::create(RawImageType type)  {
   switch (type)
   {
     case TYPE_USHORT16:
-      return new RawImageDataU16();
+      return RawImage(new RawImageDataU16());
     case TYPE_FLOAT32:
-      return new RawImageDataFloat();
+      return RawImage(new RawImageDataFloat());
     default:
       writeLog(DEBUG_PRIO_ERROR, "RawImage::create: Unknown Image type!");
   }
-  return nullptr;
+  return RawImage(nullptr);
 }
 
 inline RawImage RawImage::create(const iPoint2D &dim, RawImageType type,
                                  uint32 componentsPerPixel) {
   switch (type) {
     case TYPE_USHORT16:
-      return new RawImageDataU16(dim, componentsPerPixel);
+      return RawImage(new RawImageDataU16(dim, componentsPerPixel));
     default:
       writeLog(DEBUG_PRIO_ERROR, "RawImage::create: Unknown Image type!");
   }
-  return nullptr;
+  return RawImage(nullptr);
 }
 
 // setWithLookUp will set a single pixel by using the lookup table if supplied,
@@ -279,7 +288,7 @@ inline void RawImageDataU16::setWithLookUp(ushort16 value, uchar8* dst, uint32* 
     return;
   }
   if (table->dither) {
-    auto *t = (uint32 *)table->tables;
+    auto* t = (const uint32*)table->tables;
     uint32 lookup = t[value];
     uint32 base = lookup & 0xffff;
     uint32 delta = lookup >> 16;
@@ -294,4 +303,4 @@ inline void RawImageDataU16::setWithLookUp(ushort16 value, uchar8* dst, uint32* 
   *dest = t[value];
 }
 
-} // namespace RawSpeed
+} // namespace rawspeed

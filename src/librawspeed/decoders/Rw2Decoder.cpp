@@ -28,6 +28,7 @@
 #include "decompressors/UncompressedDecompressor.h" // for UncompressedDeco...
 #include "io/Buffer.h"                              // for Buffer
 #include "io/ByteStream.h"                          // for ByteStream
+#include "io/Endianness.h"                          // for Endianness
 #include "metadata/Camera.h"                        // for Hints
 #include "metadata/ColorFilterArray.h"              // for CFAColor::CFA_GREEN
 #include "tiff/TiffEntry.h"                         // for TiffEntry
@@ -44,9 +45,13 @@
 #include <pthread.h>
 #endif
 
-using namespace std;
+using std::vector;
+using std::move;
+using std::min;
+using std::string;
+using std::fabs;
 
-namespace RawSpeed {
+namespace rawspeed {
 
 class CameraMetaData;
 
@@ -121,14 +126,14 @@ RawImage Rw2Decoder::decodeRawInternal() {
 
     uint32 size = mFile->getSize() - offset;
 
-    UncompressedDecompressor u(ByteStream(mFile, offset), mRaw, uncorrectedRawValues);
+    UncompressedDecompressor u(ByteStream(mFile, offset), mRaw);
 
     if (size >= width*height*2) {
       // It's completely unpacked little-endian
-      u.decode12BitRawUnpacked(width, height);
+      u.decodeRawUnpacked<12, little>(width, height);
     } else if (size >= width*height*3/2) {
       // It's a packed format
-      u.decode12BitRawWithControl(width, height);
+      u.decode12BitRaw<little, false, true>(width, height);
     } else {
       // It's using the new .RW2 decoding method
       load_flags = 0;
@@ -334,4 +339,4 @@ std::string Rw2Decoder::guessMode() {
   return closest_match;
 }
 
-} // namespace RawSpeed
+} // namespace rawspeed

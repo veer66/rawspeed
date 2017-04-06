@@ -33,9 +33,10 @@
 #include <utility>                       // for pair
 #include <vector>                        // for vector
 
-using namespace std;
+using std::vector;
+using std::string;
 
-namespace RawSpeed {
+namespace rawspeed {
 
 class RawDecoder;
 
@@ -89,4 +90,4 @@ void CiffParser::MergeIFD( CiffParser* other_ciff)
   other_root->mEntry.clear();
 }
 
-} // namespace RawSpeed
+} // namespace rawspeed
