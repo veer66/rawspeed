@@ -21,7 +21,7 @@
 
 #pragma once
 
-#include "common/Common.h"       // for uint32, BitOrder::BitOrder_Jpeg16
+#include "common/Common.h"       // for uint32, BitOrder::BitOrder_MSB16
 #include "common/RawImage.h"     // for RawImage
 #include "decoders/RawDecoder.h" // for RawDecoder
 #include <map>                   // for map
@@ -34,18 +34,6 @@ class CameraMetaData;
 class Buffer;
 
 class NakedDecoder final : public RawDecoder {
-public:
-  NakedDecoder(Buffer* file, const Camera* c);
-  RawImage decodeRawInternal() override;
-  void checkSupportInternal(const CameraMetaData* meta) override;
-  void decodeMetaDataInternal(const CameraMetaData* meta) override;
-
-private:
-  static const std::map<std::string, BitOrder> order2enum;
-  void parseHints();
-
-protected:
-  int getDecoderVersion() const override { return 0; }
   const Camera* cam;
 
   uint32 width{0};
@@ -53,7 +41,19 @@ protected:
   uint32 filesize{0};
   uint32 bits{0};
   uint32 offset{0};
-  BitOrder bo{BitOrder_Jpeg16};
+  BitOrder bo{BitOrder_MSB16};
+
+  static const std::map<std::string, BitOrder> order2enum;
+  void parseHints();
+
+public:
+  NakedDecoder(Buffer* file, const Camera* c);
+  RawImage decodeRawInternal() override;
+  void checkSupportInternal(const CameraMetaData* meta) override;
+  void decodeMetaDataInternal(const CameraMetaData* meta) override;
+
+protected:
+  int getDecoderVersion() const override { return 0; }
 };
 
 } // namespace rawspeed

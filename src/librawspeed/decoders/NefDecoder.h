@@ -27,6 +27,7 @@
 #include "tiff/TiffIFD.h"                 // for TiffIFD (ptr only), TiffRo...
 #include <algorithm>                      // for move
 #include <string>                         // for string
+#include <vector>                         // for vector
 
 namespace rawspeed {
 
@@ -38,9 +39,9 @@ class Buffer;
 class NefDecoder final : public AbstractTiffDecoder
 {
 public:
-  // please revert _this_ commit, once IWYU can handle inheriting constructors
-  // using AbstractTiffDecoder::AbstractTiffDecoder;
-  NefDecoder(TiffRootIFDOwner&& root, Buffer* file)
+  static bool isAppropriateDecoder(const TiffRootIFD* rootIFD,
+                                   const Buffer* file);
+  NefDecoder(TiffRootIFDOwner&& root, const Buffer* file)
       : AbstractTiffDecoder(move(root), file) {}
 
   RawImage decodeRawInternal() override;
@@ -48,7 +49,7 @@ public:
   void checkSupportInternal(const CameraMetaData* meta) override;
 
 protected:
-  struct NefSlice final : public RawSlice {};
+  struct NefSlice final : RawSlice {};
 
 private:
   int getDecoderVersion() const override { return 5; }
@@ -58,12 +59,12 @@ private:
   void DecodeUncompressed();
   void DecodeD100Uncompressed();
   void DecodeSNefUncompressed();
-  void readCoolpixMangledRaw(ByteStream &input, iPoint2D& size, iPoint2D& offset, int inputPitch);
-  void readCoolpixSplitRaw(ByteStream &input, iPoint2D& size, iPoint2D& offset, int inputPitch);
-  void DecodeNikonSNef(ByteStream &input, uint32 w, uint32 h);
+  void readCoolpixSplitRaw(const ByteStream& input, const iPoint2D& size,
+                           const iPoint2D& offset, int inputPitch);
+  void DecodeNikonSNef(ByteStream* input, uint32 w, uint32 h);
   std::string getMode();
   std::string getExtendedMode(const std::string &mode);
-  ushort16* gammaCurve(double pwr, double ts, int mode, int imax);
+  std::vector<ushort16> gammaCurve(double pwr, double ts, int mode, int imax);
 };
 
 } // namespace rawspeed

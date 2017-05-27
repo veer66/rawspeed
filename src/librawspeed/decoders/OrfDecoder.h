@@ -36,9 +36,9 @@ class Buffer;
 class OrfDecoder final : public AbstractTiffDecoder
 {
 public:
-  // please revert _this_ commit, once IWYU can handle inheriting constructors
-  // using AbstractTiffDecoder::AbstractTiffDecoder;
-  OrfDecoder(TiffRootIFDOwner&& root, Buffer* file)
+  static bool isAppropriateDecoder(const TiffRootIFD* rootIFD,
+                                   const Buffer* file);
+  OrfDecoder(TiffRootIFDOwner&& root, const Buffer* file)
       : AbstractTiffDecoder(move(root), file) {}
 
   RawImage decodeRawInternal() override;
@@ -46,8 +46,8 @@ public:
 
 private:
   int getDecoderVersion() const override { return 3; }
-  void decodeCompressed(ByteStream& s,uint32 w, uint32 h);
-  void decodeUncompressed(ByteStream& s, uint32 w, uint32 h, uint32 size);
+  void decodeCompressed(ByteStream* s, uint32 w, uint32 h);
+  void decodeUncompressed(const ByteStream& s, uint32 w, uint32 h, uint32 size);
 };
 
 } // namespace rawspeed

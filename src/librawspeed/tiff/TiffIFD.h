@@ -60,7 +60,7 @@ class TiffIFD
   void add(TiffEntryOwner entry);
   TiffRootIFDOwner parseDngPrivateData(TiffEntry *t);
   TiffRootIFDOwner parseMakerNote(TiffEntry *t);
-  void parseIFDEntry(ByteStream& bs);
+  void parseIFDEntry(ByteStream* bs);
 
 public:
   TiffIFD() = default;
@@ -114,7 +114,7 @@ inline bool isTiffInNativeByteOrder(const ByteStream& bs, uint32 pos, const char
 }
 
 inline Endianness getTiffEndianness(const Buffer* file) {
-  ushort16 magic = *(const ushort16*)file->getData(0, 2);
+  ushort16 magic = *reinterpret_cast<const ushort16*>(file->getData(0, 2));
   if (magic == 0x4949)
     return little;
   if (magic == 0x4d4d)

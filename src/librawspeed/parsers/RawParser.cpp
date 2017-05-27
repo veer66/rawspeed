@@ -20,10 +20,12 @@
 */
 
 #include "parsers/RawParser.h"
+#include "common/Common.h"                // for make_unique
 #include "decoders/AriDecoder.h"          // for AriDecoder
 #include "decoders/MrwDecoder.h"          // for MrwDecoder
 #include "decoders/NakedDecoder.h"        // for NakedDecoder
 #include "decoders/RafDecoder.h"          // for RafDecoder
+#include "decoders/RawDecoder.h"          // for RawDecoder
 #include "decoders/RawDecoderException.h" // for RawDecoderException, ThrowRDE
 #include "io/Buffer.h"                    // for Buffer
 #include "metadata/CameraMetaData.h"      // for CameraMetaData
@@ -31,7 +33,7 @@
 #include "parsers/CiffParserException.h"  // for CiffParserException
 #include "parsers/FiffParser.h"           // for FiffParser
 #include "parsers/FiffParserException.h"  // for FiffParserException
-#include "parsers/TiffParser.h" // for TiffParser::makeDecoder, TiffParser::parse
+#include "parsers/TiffParser.h"           // for TiffParser
 #include "parsers/TiffParserException.h"  // for TiffParserException
 #include "parsers/X3fParser.h"            // for X3fParser
 #include "tiff/TiffEntry.h"               // IWYU pragma: keep
@@ -40,9 +42,7 @@ namespace rawspeed {
 
 class Camera;
 
-class RawDecoder;
-
-RawDecoder* RawParser::getDecoder(const CameraMetaData* meta) {
+std::unique_ptr<RawDecoder> RawParser::getDecoder(const CameraMetaData* meta) {
   // We need some data.
   // For now it is 104 bytes for RAF/FUJIFIM images.
   // FIXME: each decoder/parser should check it on their own.
@@ -52,14 +52,14 @@ RawDecoder* RawParser::getDecoder(const CameraMetaData* meta) {
   // MRW images are easy to check for, let's try that first
   if (MrwDecoder::isMRW(mInput)) {
     try {
-      return new MrwDecoder(mInput);
+      return make_unique<MrwDecoder>(mInput);
     } catch (RawDecoderException &) {
     }
   }
 
   if (AriDecoder::isARI(mInput)) {
     try {
-      return new AriDecoder(mInput);
+      return make_unique<AriDecoder>(mInput);
     } catch (RawDecoderException &) {
     }
   }
@@ -69,7 +69,7 @@ RawDecoder* RawParser::getDecoder(const CameraMetaData* meta) {
   if (RafDecoder::isRAF(mInput)) {
     try {
       FiffParser p(mInput);
-      return p.getDecoder();
+      return p.getDecoder(meta);
     } catch (FiffParserException&) {
     }
   }
@@ -82,7 +82,7 @@ RawDecoder* RawParser::getDecoder(const CameraMetaData* meta) {
 
   try {
     X3fParser parser(mInput);
-    return parser.getDecoder();
+    return parser.getDecoder(meta);
   } catch (RawDecoderException &) {
   }
 
@@ -90,7 +90,7 @@ RawDecoder* RawParser::getDecoder(const CameraMetaData* meta) {
   try {
     CiffParser p(mInput);
     p.parseData();
-    return p.getDecoder();
+    return p.getDecoder(meta);
   } catch (CiffParserException &) {
   }
 
@@ -99,7 +99,7 @@ RawDecoder* RawParser::getDecoder(const CameraMetaData* meta) {
     const Camera* c = meta->getChdkCamera(mInput->getSize());
 
     try {
-      return new NakedDecoder(mInput, c);
+      return make_unique<NakedDecoder>(mInput, c);
     } catch (RawDecoderException &) {
     }
   }

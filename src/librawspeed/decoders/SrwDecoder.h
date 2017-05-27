@@ -37,9 +37,9 @@ class Buffer;
 class SrwDecoder final : public AbstractTiffDecoder
 {
 public:
-  // please revert _this_ commit, once IWYU can handle inheriting constructors
-  // using AbstractTiffDecoder::AbstractTiffDecoder;
-  SrwDecoder(TiffRootIFDOwner&& root, Buffer* file)
+  static bool isAppropriateDecoder(const TiffRootIFD* rootIFD,
+                                   const Buffer* file);
+  SrwDecoder(TiffRootIFDOwner&& root, const Buffer* file)
       : AbstractTiffDecoder(move(root), file) {}
 
   RawImage decodeRawInternal() override;
@@ -54,7 +54,7 @@ private:
   void decodeCompressed2(const TiffIFD* raw, int bits);
   void decodeCompressed3(const TiffIFD* raw, int bits);
   std::string getMode();
-  static int32 samsungDiff(BitPumpMSB& pump,
+  static int32 samsungDiff(BitPumpMSB* pump,
                            const std::vector<encTableItem>& tbl);
 };
 

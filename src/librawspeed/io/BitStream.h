@@ -86,9 +86,7 @@ struct BitStreamCacheRightInLeftOut : BitStreamCacheBase
   }
 };
 
-template<typename Tag, typename Cache>
-class BitStream : private ByteStream
-{
+template <typename Tag, typename Cache> class BitStream : public ByteStream {
   Cache cache;
 
   // this method hase to be implemented in the concrete BitStream template
@@ -97,11 +95,11 @@ class BitStream : private ByteStream
   size_type fillCache(const uchar8* input);
 
 public:
-  explicit BitStream(ByteStream& s)
+  explicit BitStream(const ByteStream& s)
       : ByteStream(s.getSubStream(s.getPosition(), s.getRemainSize())) {}
 
   // deprecated:
-  BitStream(Buffer* f, size_type offset)
+  BitStream(const Buffer* f, size_type offset)
       : ByteStream(DataBuffer(f->getSubView(offset))) {}
 
 private:
@@ -152,10 +150,19 @@ public:
   inline size_type getBufferPosition() const {
     return pos - (cache.fillLevel >> 3);
   }
-  inline void setBufferPosition(size_type newPos);
+
+  // rewinds to the beginning of the buffer.
+  void resetBufferPosition() {
+    pos = 0;
+    cache.fillLevel = 0;
+    cache.cache = 0;
+  }
+
+  void setBufferPosition(size_type newPos);
 
   inline uint32 __attribute__((pure)) peekBitsNoFill(uint32 nbits) {
-    assert(nbits <= Cache::MaxGetBits && nbits <= cache.fillLevel);
+    assert(nbits <= Cache::MaxGetBits);
+    assert(nbits <= cache.fillLevel);
     return cache.peek(nbits);
   }
 
@@ -166,7 +173,8 @@ public:
   }
 
   inline void skipBitsNoFill(uint32 nbits) {
-    assert(nbits <= Cache::MaxGetBits && nbits <= cache.fillLevel);
+    assert(nbits <= Cache::MaxGetBits);
+    assert(nbits <= cache.fillLevel);
     cache.skip(nbits);
   }
 

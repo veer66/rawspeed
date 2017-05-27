@@ -32,9 +32,11 @@
 
 // define this function, it is only declared in rawspeed:
 #ifdef _OPENMP
-int rawspeed_get_number_of_processor_cores() { return omp_get_num_procs(); }
+extern "C" int rawspeed_get_number_of_processor_cores() {
+  return omp_get_num_procs();
+}
 #else
-int __attribute__((const)) rawspeed_get_number_of_processor_cores() {
+extern "C" int __attribute__((const)) rawspeed_get_number_of_processor_cores() {
   return 1;
 }
 #endif
@@ -114,9 +116,7 @@ std::string find_cameras_xml(const char *argv0) {
 
 using rawspeed::CameraMetaData;
 using rawspeed::FileReader;
-using rawspeed::Buffer;
 using rawspeed::RawParser;
-using rawspeed::RawDecoder;
 using rawspeed::RawImage;
 using rawspeed::uchar8;
 using rawspeed::uint32;
@@ -157,11 +157,11 @@ int main(int argc, char *argv[]) {
 
     FileReader f(argv[1]);
 
-    std::unique_ptr<Buffer> m(f.readFile());
+    auto m(f.readFile());
 
     RawParser t(m.get());
 
-    std::unique_ptr<RawDecoder> d(t.getDecoder(meta.get()));
+    auto d(t.getDecoder(meta.get()));
 
     if (!d.get()) {
       fprintf(stderr, "ERROR: Couldn't get a RawDecoder instance\n");
@@ -187,7 +187,9 @@ int main(int argc, char *argv[]) {
     d->decodeRaw();
     d->decodeMetaData(meta.get());
     r = d->mRaw;
-    for (auto &error : r->errors)
+
+    const auto errors = r->getErrors();
+    for (auto& error : errors)
       fprintf(stderr, "WARNING: [rawspeed] %s\n", error.c_str());
 
     fprintf(stdout, "blackLevel: %d\n", r->blackLevel);
@@ -225,53 +227,56 @@ int main(int argc, char *argv[]) {
     fprintf(stdout, "fuji_rotation_pos: %d\n", r->metadata.fujiRotationPos);
     fprintf(stdout, "pixel_aspect_ratio: %f\n", r->metadata.pixelAspectRatio);
 
-    double sum = 0.0f;
+    double sum = 0.0F;
     {
       uchar8 *const data = r->getDataUncropped(0, 0);
 
 #ifdef _OPENMP
 #pragma omp parallel for default(none) schedule(static) reduction(+ : sum)
 #endif
-      for (size_t k = 0; k < ((size_t)dimUncropped.y * dimUncropped.x * bpp);
+      for (size_t k = 0;
+           k < (static_cast<size_t>(dimUncropped.y) * dimUncropped.x * bpp);
            k++) {
-        sum += (double)data[k];
+        sum += static_cast<double>(data[k]);
       }
     }
     fprintf(stdout, "Image byte sum: %lf\n", sum);
     fprintf(stdout, "Image byte avg: %lf\n",
-            sum / (double)(dimUncropped.y * dimUncropped.x * bpp));
+            sum / static_cast<double>(dimUncropped.y * dimUncropped.x * bpp));
 
     if (r->getDataType() == TYPE_FLOAT32) {
-      sum = 0.0f;
-      auto *const data = (float *)r->getDataUncropped(0, 0);
+      sum = 0.0F;
+      auto* const data = reinterpret_cast<float*>(r->getDataUncropped(0, 0));
 
 #ifdef _OPENMP
 #pragma omp parallel for default(none) schedule(static) reduction(+ : sum)
 #endif
-      for (size_t k = 0; k < ((size_t)dimUncropped.y * dimUncropped.x); k++) {
-        sum += (double)data[k];
+      for (size_t k = 0;
+           k < (static_cast<size_t>(dimUncropped.y) * dimUncropped.x); k++) {
+        sum += static_cast<double>(data[k]);
       }
 
       fprintf(stdout, "Image float sum: %lf\n", sum);
       fprintf(stdout, "Image float avg: %lf\n",
-              sum / (double)(dimUncropped.y * dimUncropped.x));
+              sum / static_cast<double>(dimUncropped.y * dimUncropped.x));
     } else if (r->getDataType() == TYPE_USHORT16) {
-      sum = 0.0f;
-      auto *const data = (uint16_t *)r->getDataUncropped(0, 0);
+      sum = 0.0F;
+      auto* const data = reinterpret_cast<uint16_t*>(r->getDataUncropped(0, 0));
 
 #ifdef _OPENMP
 #pragma omp parallel for default(none) schedule(static) reduction(+ : sum)
 #endif
-      for (size_t k = 0; k < ((size_t)dimUncropped.y * dimUncropped.x); k++) {
-        sum += (double)data[k];
+      for (size_t k = 0;
+           k < (static_cast<size_t>(dimUncropped.y) * dimUncropped.x); k++) {
+        sum += static_cast<double>(data[k]);
       }
 
       fprintf(stdout, "Image uint16_t sum: %lf\n", sum);
       fprintf(stdout, "Image uint16_t avg: %lf\n",
-              sum / (double)(dimUncropped.y * dimUncropped.x));
+              sum / static_cast<double>(dimUncropped.y * dimUncropped.x));
     }
   } catch (RawspeedException& e) {
-    printf("ERROR: [rawspeed] %s\n", e.what());
+    fprintf(stderr, "ERROR: [rawspeed] %s\n", e.what());
 
     /* if an exception is raised lets not retry or handle the
      specific ones, consider the file as corrupted */

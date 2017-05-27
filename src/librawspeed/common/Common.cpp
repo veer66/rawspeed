@@ -26,30 +26,37 @@
 
 namespace rawspeed {
 
-void writeLog(DEBUG_PRIO priority, const char* format, ...) {
 #if defined(FUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION) && !defined(_DEBUG)
-  return;
-#endif
 
+void __attribute__((const))
+writeLog(DEBUG_PRIO priority, const char* format, ...) {
+  // When fuzzing, any output is really undesirable.
+}
+
+#else
+
+void writeLog(DEBUG_PRIO priority, const char* format, ...) {
 #ifndef _DEBUG
   if (priority < DEBUG_PRIO_INFO)
 #endif // _DEBUG
-    printf("%s", "RawSpeed:");
+    fprintf(stdout, "%s", "RawSpeed:");
 
   va_list args;
   va_start(args, format);
 
 #ifndef _DEBUG
-  if(priority < DEBUG_PRIO_INFO)
+  if (priority < DEBUG_PRIO_INFO)
 #endif // _DEBUG
-    vprintf(format, args);
+    vfprintf(stdout, format, args);
 
   va_end(args);
 
 #ifndef _DEBUG
   if (priority < DEBUG_PRIO_INFO)
 #endif // _DEBUG
-    printf("%s", "\n");
+    fprintf(stdout, "%s", "\n");
 }
+
+#endif
 
 } // namespace rawspeed

@@ -42,14 +42,14 @@ const uchar8 PentaxDecompressor::pentax_tree[][2][16] = {
      {3, 4, 2, 5, 1, 6, 0, 7, 8, 9, 10, 11, 12}},
 };
 
-void PentaxDecompressor::decompress(RawImage& mRaw, ByteStream&& data,
+void PentaxDecompressor::decompress(const RawImage& mRaw, ByteStream&& data,
                                     TiffIFD* root) {
 
   HuffmanTable ht;
 
   /* Attempt to read huffman table, if found in makernote */
-  if (root->hasEntryRecursive((TiffTag)0x220)) {
-    TiffEntry *t = root->getEntryRecursive((TiffTag)0x220);
+  if (root->hasEntryRecursive(static_cast<TiffTag>(0x220))) {
+    TiffEntry* t = root->getEntryRecursive(static_cast<TiffTag>(0x220));
     if (t->type == TIFF_UNDEFINED) {
 
       ByteStream stream = t->getData();
@@ -65,15 +65,24 @@ void PentaxDecompressor::decompress(RawImage& mRaw, ByteStream&& data,
       for (uint32 i = 0; i < depth; i++)
         v1[i] = stream.getByte();
 
-      ht.nCodesPerLength.resize(17);
+      std::vector<uchar8> nCodesPerLength;
+      nCodesPerLength.resize(17);
 
       /* Calculate codes and store bitcounts */
       for (uint32 c = 0; c < depth; c++) {
         v2[c] = v0[c]>>(12-v1[c]);
-        ht.nCodesPerLength.at(v1[c])++;
+        nCodesPerLength.at(v1[c])++;
       }
+
+      assert(nCodesPerLength.size() == 17);
+      assert(nCodesPerLength[0] == 0);
+      auto nCodes = ht.setNCodesPerLength(Buffer(&nCodesPerLength[1], 16));
+      assert(nCodes == depth);
+
+      std::vector<uchar8> codeValues;
+      codeValues.reserve(nCodes);
+
       /* Find smallest */
-      ht.codeValues.reserve(depth);
       for (uint32 i = 0; i < depth; i++) {
         uint32 sm_val = 0xfffffff;
         uint32 sm_num = 0xff;
@@ -83,10 +92,12 @@ void PentaxDecompressor::decompress(RawImage& mRaw, ByteStream&& data,
             sm_val = v2[j];
           }
         }
-        ht.codeValues.push_back(sm_num);
+        codeValues.push_back(sm_num);
         v2[sm_num]=0xffffffff;
       }
-      assert(ht.codeValues.size() == depth);
+
+      assert(codeValues.size() == nCodes);
+      ht.setCodeValues(Buffer(codeValues.data(), nCodes));
     } else {
       ThrowRDE("Unknown Huffman table type.");
     }
@@ -110,7 +121,8 @@ void PentaxDecompressor::decompress(RawImage& mRaw, ByteStream&& data,
   int pLeft2 = 0;
 
   for (uint32 y = 0;y < h;y++) {
-    dest = (ushort16*) & draw[y*mRaw->pitch];  // Adjust destination
+    dest = reinterpret_cast<ushort16*>(
+        &draw[y * mRaw->pitch]); // Adjust destination
     pUp1[y&1] += ht.decodeNext(bs);
     pUp2[y&1] += ht.decodeNext(bs);
     dest[0] = pLeft1 = pUp1[y&1];

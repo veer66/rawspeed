@@ -1,7 +1,9 @@
 /*
     RawSpeed - RAW file decoder.
 
-    Copyright (C) 2017 Axel Waggershauser
+    Copyright (C) 2009-2014 Klaus Post
+    Copyright (C) 2014 Pedro Côrte-Real
+    Copyright (C) 2017 Roman Lebedev
 
     This library is free software; you can redistribute it and/or
     modify it under the terms of the GNU Lesser General Public
@@ -20,34 +22,28 @@
 
 #pragma once
 
-#include "common/Common.h" // for uint32, uchar8
-#include "io/BitStream.h"  // for BitStream, BitStreamCacheLeftInRightOut
-#include "io/Buffer.h"     // for Buffer::size_type
-#include "io/Endianness.h" // for getLE
+#include "common/Common.h"                // for uint32
+#include "decoders/AbstractTiffDecoder.h" // for AbstractTiffDecoder
+#include "tiff/TiffIFD.h"                 // for TiffIFD (ptr only), TiffRo...
+#include <algorithm>                      // for move
 
 namespace rawspeed {
 
-struct PlainBitPumpTag;
+class Buffer;
 
-// The PlainPump is ordered in LSB bit order,
-// i.e. we push into the cache from the left and read it from the right
+class SimpleTiffDecoder : public AbstractTiffDecoder {
+public:
+  SimpleTiffDecoder(TiffRootIFDOwner&& root, const Buffer* file)
+      : AbstractTiffDecoder(move(root), file) {}
 
-using BitPumpPlain = BitStream<PlainBitPumpTag, BitStreamCacheLeftInRightOut>;
+  void prepareForRawDecoding();
 
-template <>
-inline BitPumpPlain::size_type BitPumpPlain::fillCache(const uchar8* input)
-{
-  static_assert(BitStreamCacheBase::MaxGetBits >= 32, "check implementation");
-
-  cache.push(getLE<uint32>(input), 32);
-  return 4;
-}
-
-template <> inline void BitPumpPlain::setBufferPosition(size_type newPos)
-{
-  pos = newPos;
-  cache.fillLevel = 0;
-  cache.cache = 0;
-}
+protected:
+  const TiffIFD* raw;
+  uint32 width;
+  uint32 height;
+  uint32 off;
+  uint32 c2;
+};
 
 } // namespace rawspeed

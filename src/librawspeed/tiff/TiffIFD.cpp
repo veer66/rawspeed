@@ -39,17 +39,17 @@ using std::vector;
 
 namespace rawspeed {
 
-void TiffIFD::parseIFDEntry(ByteStream& bs) {
+void TiffIFD::parseIFDEntry(ByteStream* bs) {
   TiffEntryOwner t;
 
-  auto origPos = bs.getPosition();
+  auto origPos = bs->getPosition();
 
   try {
     t = make_unique<TiffEntry>(this, bs);
   } catch (IOException&) { // Ignore unparsable entry
     // fix probably broken position due to interruption by exception
     // i.e. setting it to the next entry.
-    bs.setPosition(origPos + 12);
+    bs->setPosition(origPos + 12);
     return;
   }
 
@@ -67,11 +67,8 @@ void TiffIFD::parseIFDEntry(ByteStream& bs) {
     case FUJI_RAW_IFD:
     case SUBIFDS:
     case EXIFIFDPOINTER:
-      for (uint32 j = 0; j < t->count; j++) {
-        add(make_unique<TiffIFD>(this, bs, t->getU32(j)));
-        // if (getSubIFDs().back()->getNextIFD() != 0)
-        //   cerr << "detected chained subIFds" << endl;
-      }
+      for (uint32 j = 0; j < t->count; j++)
+        add(make_unique<TiffIFD>(this, *bs, t->getU32(j)));
       break;
 
     default:
@@ -98,7 +95,7 @@ TiffIFD::TiffIFD(TiffIFD* parent_, const DataBuffer& data, uint32 offset)
   auto numEntries = bs.getU16(); // Directory entries in this IFD
 
   for (uint32 i = 0; i < numEntries; i++)
-    parseIFDEntry(bs);
+    parseIFDEntry(&bs);
 
   nextIFD = bs.getU32();
 }
@@ -148,7 +145,7 @@ TiffRootIFDOwner TiffIFD::parseMakerNote(TiffEntry* t)
     makeEntry = p->getEntryRecursive(MAKE);
     p = p->parent;
   } while (!makeEntry && p);
-  string make = makeEntry ? trimSpaces(makeEntry->getString()) : "";
+  string make = makeEntry != nullptr ? trimSpaces(makeEntry->getString()) : "";
 
   ByteStream bs = t->getData();
 
@@ -244,9 +241,12 @@ TiffEntry* __attribute__((pure)) TiffIFD::getEntryRecursive(TiffTag tag) const {
 
 void TiffIFD::checkOverflow() {
   TiffIFD* p = this;
-  for (int i = 1; p; ++i, p = p->parent )
+  int i = 0;
+  while ((p = p->parent) != nullptr) {
+    i++;
     if (i > 5)
       ThrowTPE("TiffIFD cascading overflow.");
+  }
 }
 
 void TiffIFD::add(TiffIFDOwner subIFD) {

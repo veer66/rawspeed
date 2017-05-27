@@ -33,9 +33,9 @@ class Buffer;
 class PefDecoder final : public AbstractTiffDecoder
 {
 public:
-  // please revert _this_ commit, once IWYU can handle inheriting constructors
-  // using AbstractTiffDecoder::AbstractTiffDecoder;
-  PefDecoder(TiffRootIFDOwner&& root, Buffer* file)
+  static bool isAppropriateDecoder(const TiffRootIFD* rootIFD,
+                                   const Buffer* file);
+  PefDecoder(TiffRootIFDOwner&& root, const Buffer* file)
       : AbstractTiffDecoder(move(root), file) {}
 
   RawImage decodeRawInternal() override;

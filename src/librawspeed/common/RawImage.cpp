@@ -30,20 +30,15 @@
 #include <cmath>                          // for NAN
 #include <cstdlib>                        // for free
 #include <cstring>                        // for memset, memcpy, strdup
+#include <memory>                         // for unique_ptr
 
 using std::fill_n;
 using std::string;
-using std::min;
 
 namespace rawspeed {
 
 RawImageData::RawImageData() : cfa(iPoint2D(0, 0)) {
   fill_n(blackLevelSeparate, 4, -1);
-#ifdef HAVE_PTHREAD
-  pthread_mutex_init(&mymutex, nullptr);
-  pthread_mutex_init(&errMutex, nullptr);
-  pthread_mutex_init(&mBadPixelMutex, nullptr);
-#endif
 }
 
 RawImageData::RawImageData(const iPoint2D& _dim, uint32 _bpc, uint32 _cpp)
@@ -51,11 +46,6 @@ RawImageData::RawImageData(const iPoint2D& _dim, uint32 _bpc, uint32 _cpp)
       bpp(_bpc * _cpp) {
   fill_n(blackLevelSeparate, 4, -1);
   createData();
-#ifdef HAVE_PTHREAD
-  pthread_mutex_init(&mymutex, nullptr);
-  pthread_mutex_init(&errMutex, nullptr);
-  pthread_mutex_init(&mBadPixelMutex, nullptr);
-#endif
 }
 
 ImageMetaData::ImageMetaData() {
@@ -69,15 +59,7 @@ ImageMetaData::ImageMetaData() {
 RawImageData::~RawImageData() {
   assert(dataRefCount == 0);
   mOffset = iPoint2D(0, 0);
-#ifdef HAVE_PTHREAD
-  pthread_mutex_destroy(&mymutex);
-  pthread_mutex_destroy(&errMutex);
-  pthread_mutex_destroy(&mBadPixelMutex);
-#endif
 
-  delete table;
-
-  errors.clear();
   destroyData();
 }
 
@@ -93,7 +75,7 @@ void RawImageData::createData() {
     ThrowRDE("Duplicate data allocation in createData.");
 
   // want each line to start at 16-byte aligned address
-  pitch = roundUp((size_t)dim.x * bpp, alignment);
+  pitch = roundUp(static_cast<size_t>(dim.x) * bpp, alignment);
   assert(isAligned(pitch, alignment));
 
 #if defined(DEBUG) || __has_feature(address_sanitizer) ||                      \
@@ -199,16 +181,16 @@ void RawImageData::setCpp(uint32 val) {
   bpp *= val;
 }
 
-uchar8* RawImageData::getData() {
+uchar8* RawImageData::getData() const {
   if (!data)
     ThrowRDE("Data not yet allocated.");
   return &data[mOffset.y*pitch+mOffset.x*bpp];
 }
 
 uchar8* RawImageData::getData(uint32 x, uint32 y) {
-  if ((int)x >= dim.x)
+  if (static_cast<int>(x) >= dim.x)
     ThrowRDE("X Position outside image requested.");
-  if ((int)y >= dim.y) {
+  if (static_cast<int>(y) >= dim.y) {
     ThrowRDE("Y Position outside image requested.");
   }
 
@@ -218,20 +200,20 @@ uchar8* RawImageData::getData(uint32 x, uint32 y) {
   if (!data)
     ThrowRDE("Data not yet allocated.");
 
-  return &data[(size_t)y * pitch + x * bpp];
+  return &data[static_cast<size_t>(y) * pitch + x * bpp];
 }
 
 uchar8* RawImageData::getDataUncropped(uint32 x, uint32 y) {
-  if ((int)x >= uncropped_dim.x)
+  if (static_cast<int>(x) >= uncropped_dim.x)
     ThrowRDE("X Position outside image requested.");
-  if ((int)y >= uncropped_dim.y) {
+  if (static_cast<int>(y) >= uncropped_dim.y) {
     ThrowRDE("Y Position outside image requested.");
   }
 
   if (!data)
     ThrowRDE("Data not yet allocated.");
 
-  return &data[(size_t)y * pitch + x * bpp];
+  return &data[static_cast<size_t>(y) * pitch + x * bpp];
 }
 
 iPoint2D __attribute__((pure)) rawspeed::RawImageData::getUncroppedDim() const {
@@ -265,16 +247,6 @@ void RawImageData::subFrame(iRectangle2D crop) {
   dim = crop.dim;
 }
 
-void RawImageData::setError(const string& err) {
-#ifdef HAVE_PTHREAD
-  pthread_mutex_lock(&errMutex);
-#endif
-  errors.push_back(err);
-#ifdef HAVE_PTHREAD
-  pthread_mutex_unlock(&errMutex);
-#endif
-}
-
 void RawImageData::createBadPixelMap()
 {
   if (!isAllocated())
@@ -282,55 +254,39 @@ void RawImageData::createBadPixelMap()
   mBadPixelMapPitch = roundUp(uncropped_dim.x / 8, 16);
   mBadPixelMap =
       alignedMallocArray<uchar8, 16>(uncropped_dim.y, mBadPixelMapPitch);
-  memset(mBadPixelMap, 0, (size_t)mBadPixelMapPitch * uncropped_dim.y);
+  memset(mBadPixelMap, 0,
+         static_cast<size_t>(mBadPixelMapPitch) * uncropped_dim.y);
   if (!mBadPixelMap)
     ThrowRDE("Memory Allocation failed.");
 }
 
 RawImage::RawImage(RawImageData* p) : p_(p) {
-#ifdef HAVE_PTHREAD
-  pthread_mutex_lock(&p_->mymutex);
-#endif
+  MutexLocker guard(&p_->mymutex);
   ++p_->dataRefCount;
-#ifdef HAVE_PTHREAD
-  pthread_mutex_unlock(&p_->mymutex);
-#endif
 }
 
 RawImage::RawImage(const RawImage& p) : p_(p.p_) {
-#ifdef HAVE_PTHREAD
-  pthread_mutex_lock(&p_->mymutex);
-#endif
+  MutexLocker guard(&p_->mymutex);
   ++p_->dataRefCount;
-#ifdef HAVE_PTHREAD
-  pthread_mutex_unlock(&p_->mymutex);
-#endif
 }
 
 RawImage::~RawImage() {
-#ifdef HAVE_PTHREAD
-  pthread_mutex_lock(&p_->mymutex);
-#endif
-  if (--p_->dataRefCount == 0) {
-#ifdef HAVE_PTHREAD
-    pthread_mutex_unlock(&p_->mymutex);
-#endif
+  p_->mymutex.Lock();
+
+  --p_->dataRefCount;
+
+  if (p_->dataRefCount == 0) {
+    p_->mymutex.Unlock();
     delete p_;
     return;
   }
-#ifdef HAVE_PTHREAD
-  pthread_mutex_unlock(&p_->mymutex);
-#endif
-}
 
-void RawImageData::copyErrorsFrom(const RawImage& other) {
-  for (auto &error : other->errors) {
-    setError(error);
-  }
+  p_->mymutex.Unlock();
 }
 
 void RawImageData::transferBadPixelsToMap()
 {
+  MutexLocker guard(&mBadPixelMutex);
   if (mBadPixelPositions.empty())
     return;
 
@@ -408,21 +364,23 @@ void RawImageData::startWorker(RawImageWorker::RawImageWorkerTask task, bool cro
   }
 
 #ifdef HAVE_PTHREAD
-  auto **workers = new RawImageWorker *[threads];
+  std::vector<RawImageWorker> workers;
+  workers.reserve(threads);
+
   int y_offset = 0;
   int y_per_thread = (height + threads - 1) / threads;
 
   for (int i = 0; i < threads; i++) {
-    int y_end = min(y_offset + y_per_thread, height);
-    workers[i] = new RawImageWorker(this, task, y_offset, y_end);
-    workers[i]->startThread();
+    int y_end = std::min(y_offset + y_per_thread, height);
+
+    workers.emplace_back(this, task, y_offset, y_end);
+    workers.back().startThread();
+
     y_offset = y_end;
   }
-  for (int i = 0; i < threads; i++) {
-    workers[i]->waitForThread();
-    delete workers[i];
-  }
-  delete[] workers;
+
+  for (auto& worker : workers)
+    worker.waitForThread();
 #else
   ThrowRDE("Unreachable");
 #endif
@@ -435,11 +393,12 @@ void RawImageData::fixBadPixelsThread( int start_y, int end_y )
   int bad_count = 0;
 #endif
   for (int y = start_y; y < end_y; y++) {
-    auto* bad_map = (const uint32*)&mBadPixelMap[y * mBadPixelMapPitch];
+    auto* bad_map =
+        reinterpret_cast<const uint32*>(&mBadPixelMap[y * mBadPixelMapPitch]);
     for (int x = 0 ; x < gw; x++) {
       // Test if there is a bad pixel within these 32 pixels
       if (bad_map[x] != 0) {
-        auto* bad = (const uchar8*)&bad_map[x];
+        auto* bad = reinterpret_cast<const uchar8*>(&bad_map[x]);
         // Go through each pixel
         for (int i = 0; i < 4; i++) {
           for (int j = 0; j < 8; j++) {
@@ -509,14 +468,14 @@ void RawImageData::expandBorder(iRectangle2D validData)
     uchar8* src_pos = getData(0, validData.pos.y);
     for (int y = 0; y < validData.pos.y; y++ ) {
       uchar8* dst_pos = getData(0, y);
-      memcpy(dst_pos, src_pos, (size_t)dim.x * bpp);
+      memcpy(dst_pos, src_pos, static_cast<size_t>(dim.x) * bpp);
     }
   }
   if (validData.getBottom() < dim.y) {
     uchar8* src_pos = getData(0, validData.getBottom()-1);
     for (int y = validData.getBottom(); y < dim.y; y++ ) {
       uchar8* dst_pos = getData(0, y);
-      memcpy(dst_pos, src_pos, (size_t)dim.x * bpp);
+      memcpy(dst_pos, src_pos, static_cast<size_t>(dim.x) * bpp);
     }
   }
 }
@@ -529,36 +488,15 @@ void RawImageData::clearArea( iRectangle2D area, uchar8 val /*= 0*/ )
     return;
 
   for (int y = area.getTop(); y < area.getBottom(); y++)
-    memset(getData(area.getLeft(), y), val, (size_t)area.getWidth() * bpp);
+    memset(getData(area.getLeft(), y), val,
+           static_cast<size_t>(area.getWidth()) * bpp);
 }
 
 RawImage& RawImage::operator=(RawImage&& rhs) noexcept {
   if (this == &rhs)
     return *this;
 
-#ifdef HAVE_PTHREAD
-  pthread_mutex_lock(&p_->mymutex);
-#endif
-
-  // Retain the old RawImageData before overwriting it
-  RawImageData* const old = p_;
-  p_ = rhs.p_;
-
-  // Increment use on new data
-  ++p_->dataRefCount;
-
-  // If the RawImageData previously used by "this" is unused, delete it.
-  if (--old->dataRefCount == 0) {
-#ifdef HAVE_PTHREAD
-    pthread_mutex_unlock(&(old->mymutex));
-#endif
-
-    delete old;
-  } else {
-#ifdef HAVE_PTHREAD
-    pthread_mutex_unlock(&(old->mymutex));
-#endif
-  }
+  std::swap(p_, rhs.p_);
 
   return *this;
 }
@@ -574,7 +512,7 @@ RawImage& RawImage::operator=(const RawImage& rhs) noexcept {
 }
 
 void *RawImageWorkerThread(void *_this) {
-  auto *me = (RawImageWorker *)_this;
+  auto* me = static_cast<RawImageWorker*>(_this);
   me->performTask();
   return nullptr;
 }
@@ -639,78 +577,16 @@ void RawImageData::sixteenBitLookup() {
   startWorker(RawImageWorker::APPLY_LOOKUP, true);
 }
 
-void RawImageData::setTable( TableLookUp *t )
-{
-  delete table;
-
-  table = t;
+void RawImageData::setTable(std::unique_ptr<TableLookUp> t) {
+  table = std::move(t);
 }
 
-void RawImageData::setTable(const ushort16 *table_, int nfilled, bool dither) {
-  assert(table_);
-  assert(nfilled > 0);
+void RawImageData::setTable(const std::vector<ushort16>& table_, bool dither) {
+  assert(!table_.empty());
 
-  auto *t = new TableLookUp(1, dither);
-  t->setTable(0, table_, nfilled);
-  this->setTable(t);
-}
-
-const int TABLE_SIZE = 65536 * 2;
-
-// Creates n numre of tables.
-TableLookUp::TableLookUp( int _ntables, bool _dither ) : ntables(_ntables), dither(_dither) {
-  tables = nullptr;
-  if (ntables < 1) {
-    ThrowRDE("Cannot construct 0 tables");
-  }
-  tables = new ushort16[ntables * TABLE_SIZE];
-  memset(tables, 0, sizeof(ushort16) * ntables * TABLE_SIZE);
-}
-
-TableLookUp::~TableLookUp()
-{
-  delete[] tables;
-  tables = nullptr;
-}
-
-
-void TableLookUp::setTable(int ntable, const ushort16 *table , int nfilled) {
-  assert(table);
-  assert(nfilled > 0);
-
-  if (ntable > ntables) {
-    ThrowRDE("Table lookup with number greater than number of tables.");
-  }
-  ushort16* t = &tables[ntable* TABLE_SIZE];
-  if (!dither) {
-    for (int i = 0; i < 65536; i++) {
-      t[i] = (i < nfilled) ? table[i] : table[nfilled-1];
-    }
-    return;
-  }
-  for (int i = 0; i < nfilled; i++) {
-    int center = table[i];
-    int lower = i > 0 ? table[i-1] : center;
-    int upper = i < (nfilled-1) ? table[i+1] : center;
-    int delta = upper - lower;
-    t[i*2] = center - ((upper - lower + 2) / 4);
-    t[i*2+1] = delta;
-  }
-
-  for (int i = nfilled; i < 65536; i++) {
-    t[i*2] = table[nfilled-1];
-    t[i*2+1] = 0;
-  }
-  t[0] = t[1];
-  t[TABLE_SIZE - 1] = t[TABLE_SIZE - 2];
-}
-
-
-ushort16* TableLookUp::getTable(int n) {
-  if (n > ntables) {
-    ThrowRDE("Table lookup with number greater than number of tables.");
-  }
-  return &tables[n * TABLE_SIZE];
+  auto t = make_unique<TableLookUp>(1, dither);
+  t->setTable(0, table_);
+  this->setTable(std::move(t));
 }
 
 } // namespace rawspeed

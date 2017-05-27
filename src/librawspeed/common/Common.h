@@ -29,9 +29,10 @@
 #include <initializer_list> // for initializer_list
 #include <memory>           // for unique_ptr, allocator
 #include <string>           // for string
+#include <type_traits>      // for enable_if, is_pointer
 #include <vector>           // for vector
 
-int rawspeed_get_number_of_processor_cores();
+extern "C" int rawspeed_get_number_of_processor_cores();
 
 namespace rawspeed {
 
@@ -58,7 +59,7 @@ inline void copyPixels(uchar8* dest, int dstPitch, const uchar8* src,
                        int srcPitch, int rowSize, int height)
 {
   if (height == 1 || (dstPitch == srcPitch && srcPitch == rowSize))
-    memcpy(dest, src, (size_t)rowSize * height);
+    memcpy(dest, src, static_cast<size_t>(rowSize) * height);
   else {
     for (int y = height; y > 0; --y) {
       memcpy(dest, src, rowSize);
@@ -80,10 +81,22 @@ roundUp(size_t value, size_t multiple) {
              : value + multiple - (value % multiple);
 }
 
-template <typename T>
-constexpr inline __attribute__((const)) bool isAligned(T value,
-                                                       size_t multiple) {
-  return (multiple == 0) || ((uintptr_t)value % multiple == 0);
+template <class T>
+inline constexpr __attribute__((const)) bool
+isAligned(T value, size_t multiple,
+          typename std::enable_if<std::is_pointer<T>::value>::type* /*unused*/ =
+              nullptr) {
+  return (multiple == 0) ||
+         (reinterpret_cast<std::uintptr_t>(value) % multiple == 0);
+}
+
+template <class T>
+inline constexpr __attribute__((const)) bool isAligned(
+    T value, size_t multiple,
+    typename std::enable_if<!std::is_pointer<T>::value>::type* /*unused*/ =
+        nullptr) {
+  return (multiple == 0) ||
+         (static_cast<std::uintptr_t>(value) % multiple == 0);
 }
 
 template <typename T, typename T2>
@@ -162,10 +175,11 @@ inline std::vector<std::string> splitString(const std::string& input,
 }
 
 enum BitOrder {
-  BitOrder_Plain,  /* Memory order */
-  BitOrder_Jpeg,   /* Input is added to stack byte by byte, and output is lifted from top */
-  BitOrder_Jpeg16, /* Same as above, but 16 bits at the time */
-  BitOrder_Jpeg32, /* Same as above, but 32 bits at the time */
+  BitOrder_LSB,   /* Memory order */
+  BitOrder_MSB,   /* Input is added to stack byte by byte, and output is lifted
+                     from top */
+  BitOrder_MSB16, /* Same as above, but 16 bits at the time */
+  BitOrder_MSB32, /* Same as above, but 32 bits at the time */
 };
 
 // little 'forced' loop unrolling helper tool, example:

@@ -19,13 +19,15 @@
 */
 
 #include "parsers/X3fParser.h"
-#include "common/Common.h"                // for uint32, uchar8
+#include "common/Common.h"                // for uint32, uchar8, make_unique
+#include "decoders/RawDecoder.h"          // for RawDecoder
 #include "decoders/RawDecoderException.h" // for ThrowRDE, RawDecoderException
 #include "decoders/X3fDecoder.h"          // for X3fDecoder
 #include "io/Buffer.h"                    // for Buffer
 #include "io/ByteStream.h"                // for ByteStream
 #include "io/Endianness.h"                // for getHostEndianness, Endiann...
 #include "io/IOException.h"               // for IOException
+#include <algorithm>                      // for move
 #include <cassert>                        // for assert
 #include <cstring>                        // for memset
 #include <map>                            // for map, map<>::mapped_type
@@ -37,91 +39,77 @@ using std::string;
 namespace rawspeed {
 
 X3fParser::X3fParser(Buffer* file) : RawParser(file) {
-  decoder = nullptr;
-  bytes = nullptr;
   uint32 size = file->getSize();
   if (size < 104 + 128)
     ThrowRDE("X3F file too small");
 
-  bytes = new ByteStream(file, 0, size, getHostEndianness() == little);
+  bytes = ByteStream(file, 0, size, getHostEndianness() == little);
 
   try {
     // Read signature
-    if (bytes->getU32() != 0x62564f46)
+    if (bytes.getU32() != 0x62564f46)
       ThrowRDE("Not an X3f file (Signature)");
 
-    uint32 version = bytes->getU32();
+    uint32 version = bytes.getU32();
     if (version < 0x00020000)
       ThrowRDE("File version too old");
 
     // Skip identifier + mark bits
-    bytes->skipBytes(16 + 4);
+    bytes.skipBytes(16 + 4);
 
-    bytes->setPosition(0);
-    decoder = new X3fDecoder(file);
-    readDirectory();
+    bytes.setPosition(0);
   } catch (IOException& e) {
     ThrowRDE("IO Error while reading header: %s", e.what());
-  } catch (RawDecoderException& e) {
-    freeObjects();
-    throw;
   }
 }
-
-void X3fParser::freeObjects() {
-  delete bytes;
-  delete decoder;
-  decoder = nullptr;
-  bytes = nullptr;
-}
-
-X3fParser::~X3fParser() { freeObjects(); }
 
 static string getIdAsString(ByteStream *bytes) {
   uchar8 id[5];
   for (int i = 0; i < 4; i++)
     id[i] = bytes->getByte();
   id[4] = 0;
-  return string((const char*)id);
+  return string(reinterpret_cast<const char*>(id));
 }
 
-
-void X3fParser::readDirectory()
-{
-  bytes->setPosition(mInput->getSize() - 4);
-  uint32 dir_off = bytes->getU32();
-  bytes->setPosition(dir_off);
+void X3fParser::readDirectory(X3fDecoder* decoder) {
+  bytes.setPosition(mInput->getSize() - 4);
+  uint32 dir_off = bytes.getU32();
+  bytes.setPosition(dir_off);
 
   // Check signature
-  if ("SECd" != getIdAsString(bytes))
+  if ("SECd" != getIdAsString(&bytes))
     ThrowRDE("Unable to locate directory");
 
-  uint32 version = bytes->getU32();
+  uint32 version = bytes.getU32();
   if (version < 0x00020000)
     ThrowRDE("File version too old (directory)");
 
-  uint32 n_entries = bytes->getU32();
+  uint32 n_entries = bytes.getU32();
   for (uint32 i = 0; i < n_entries; i++) {
-    X3fDirectory dir(bytes);
+    X3fDirectory dir(&bytes);
     decoder->mDirectory.push_back(dir);
-    uint32 old_pos = bytes->getPosition();
+    uint32 old_pos = bytes.getPosition();
     if ("IMA2" == dir.id || "IMAG" == dir.id) {
-      decoder->mImages.emplace_back(bytes, dir.offset, dir.length);
+      decoder->mImages.emplace_back(&bytes, dir.offset, dir.length);
     }
     if ("PROP" == dir.id) {
-      decoder->mProperties.addProperties(bytes, dir.offset, dir.length);
+      decoder->mProperties.addProperties(&bytes, dir.offset, dir.length);
     }
-    bytes->setPosition(old_pos);
+    bytes.setPosition(old_pos);
   }
 }
 
-RawDecoder* X3fParser::getDecoder()
-{
-  if (nullptr == decoder)
-    ThrowRDE("No decoder found!");
-  RawDecoder *ret = decoder;
-  decoder = nullptr;
-  return ret;
+std::unique_ptr<RawDecoder> X3fParser::getDecoder(const CameraMetaData* meta) {
+  try {
+    auto decoder = make_unique<X3fDecoder>(mInput);
+    readDirectory(decoder.get());
+
+    if (nullptr == decoder)
+      ThrowRDE("No decoder found!");
+    return std::move(decoder);
+  } catch (IOException& e) {
+    ThrowRDE("IO Error while reading header: %s", e.what());
+  }
 }
 
 X3fDirectory::X3fDirectory( ByteStream *bytes )
@@ -221,7 +209,8 @@ static bool ConvertUTF16toUTF8(const UTF16** sourceStart,
     const UTF32 byteMask = 0xBF;
     const UTF32 byteMark = 0x80;
     const UTF16* oldSource = source; /* In case we have to back up because of target overflow. */
-    ch = *source++;
+    ch = *source;
+    source++;
     /* If we have a surrogate pair, convert to UTF32 first. */
     if (ch >= UNI_SUR_HIGH_START && ch <= UNI_SUR_HIGH_END) {
       /* If the 16 bits following the high surrogate are in the source buffer... */
@@ -246,10 +235,14 @@ static bool ConvertUTF16toUTF8(const UTF16** sourceStart,
       }
     }
     /* Figure out how many bytes the result will require */
-    if (ch < (UTF32)0x80) {      bytesToWrite = 1;
-    } else if (ch < (UTF32)0x800) {     bytesToWrite = 2;
-    } else if (ch < (UTF32)0x10000) {   bytesToWrite = 3;
-    } else if (ch < (UTF32)0x110000) {  bytesToWrite = 4;
+    if (ch < static_cast<UTF32>(0x80)) {
+      bytesToWrite = 1;
+    } else if (ch < static_cast<UTF32>(0x800)) {
+      bytesToWrite = 2;
+    } else if (ch < static_cast<UTF32>(0x10000)) {
+      bytesToWrite = 3;
+    } else if (ch < static_cast<UTF32>(0x110000)) {
+      bytesToWrite = 4;
     } else {                            bytesToWrite = 3;
     ch = UNI_REPLACEMENT_CHAR;
     }
@@ -263,10 +256,12 @@ static bool ConvertUTF16toUTF8(const UTF16** sourceStart,
     }
     assert(bytesToWrite > 0);
     for (int i = bytesToWrite; i > 1; i--) {
-      *--target = (UTF8)((ch | byteMark) & byteMask);
+      target--;
+      *target = static_cast<UTF8>((ch | byteMark) & byteMask);
       ch >>= 6;
     }
-    *--target = (UTF8)(ch | firstByteMark[bytesToWrite]);
+    target--;
+    *target = static_cast<UTF8>(ch | firstByteMark[bytesToWrite]);
     target += bytesToWrite;
   }
   // Function modified to retain source + target positions
@@ -277,7 +272,8 @@ static bool ConvertUTF16toUTF8(const UTF16** sourceStart,
 
 string X3fPropertyCollection::getString( ByteStream *bytes ) {
   uint32 max_len = bytes->getRemainSize() / 2;
-  const auto *start = (const UTF16 *)bytes->getData(max_len * 2);
+  const auto* start =
+      reinterpret_cast<const UTF16*>(bytes->getData(max_len * 2));
   const UTF16* src_end = start;
   uint32 i = 0;
   for (; i < max_len && start == src_end; i++) {
@@ -289,7 +285,7 @@ string X3fPropertyCollection::getString( ByteStream *bytes ) {
     auto *dest = new UTF8[i * 4UL + 1];
     memset(dest, 0, i * 4UL + 1);
     if (ConvertUTF16toUTF8(&start, src_end, &dest, &dest[i * 4 - 1])) {
-      string ret((const char*)dest);
+      string ret(reinterpret_cast<const char*>(dest));
       delete[] dest;
       return ret;
     }

@@ -20,6 +20,8 @@
 
 #pragma once
 
+#include <memory> // for unique_ptr
+
 namespace rawspeed {
 
 class Buffer;
@@ -31,7 +33,10 @@ class RawDecoder;
 class RawParser {
 public:
   explicit RawParser(Buffer* inputData) : mInput(inputData) {}
-  RawDecoder* getDecoder(const CameraMetaData* meta = nullptr);
+  virtual ~RawParser() = default;
+
+  virtual std::unique_ptr<RawDecoder>
+  getDecoder(const CameraMetaData* meta = nullptr);
 
 protected:
   Buffer* mInput;

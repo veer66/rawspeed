@@ -21,8 +21,11 @@
 
 #pragma once
 
-#include <memory> // for unique_ptr
-#include <vector> // for vector
+#include "common/Common.h" // for uint32
+#include <map>             // for map
+#include <memory>          // for unique_ptr
+#include <utility>         // for pair
+#include <vector>          // for vector
 
 namespace rawspeed {
 
@@ -30,12 +33,14 @@ class RawImage;
 
 class TiffEntry;
 
+class ByteStream;
+
 class DngOpcodes
 {
 public:
   explicit DngOpcodes(TiffEntry* entry);
   ~DngOpcodes();
-  void applyOpCodes(RawImage& ri);
+  void applyOpCodes(const RawImage& ri);
 
 private:
   class DngOpcode;
@@ -53,6 +58,12 @@ protected:
   class DeltaRowOrColBase;
   template <typename S> class OffsetPerRowOrCol;
   template <typename S> class ScalePerRowOrCol;
+
+  template <class Opcode>
+  static std::unique_ptr<DngOpcode> constructor(ByteStream* bs);
+
+  using constructor_t = std::unique_ptr<DngOpcode> (*)(ByteStream* bs);
+  static const std::map<uint32, std::pair<const char*, constructor_t>> Map;
 };
 
 } // namespace rawspeed

@@ -39,9 +39,9 @@ class Buffer;
 class ArwDecoder final : public AbstractTiffDecoder
 {
 public:
-  // please revert _this_ commit, once IWYU can handle inheriting constructors
-  // using AbstractTiffDecoder::AbstractTiffDecoder;
-  ArwDecoder(TiffRootIFDOwner&& root, Buffer* file)
+  static bool isAppropriateDecoder(const TiffRootIFD* rootIFD,
+                                   const Buffer* file);
+  ArwDecoder(TiffRootIFDOwner&& root, const Buffer* file)
       : AbstractTiffDecoder(move(root), file) {}
 
   RawImage decodeRawInternal() override;
@@ -50,8 +50,8 @@ public:
 
 protected:
   int getDecoderVersion() const override { return 1; }
-  void DecodeARW(ByteStream &input, uint32 w, uint32 h);
-  void DecodeARW2(ByteStream &input, uint32 w, uint32 h, uint32 bpp);
+  void DecodeARW(const ByteStream& input, uint32 w, uint32 h);
+  void DecodeARW2(const ByteStream& input, uint32 w, uint32 h, uint32 bpp);
   void DecodeUncompressed(const TiffIFD* raw);
   void SonyDecrypt(const uint32* ibuf, uint32* obuf, uint32 len, uint32 key);
   void GetWB();

@@ -32,8 +32,20 @@
 #include "tiff/TiffIFD.h"                     // for TiffRootIFD, TiffIFD
 #include "tiff/TiffTag.h"                     // for TiffTag, TiffTag::ISOS...
 #include <memory>                             // for unique_ptr
+#include <string>                             // for operator==, string
 
 namespace rawspeed {
+
+bool PefDecoder::isAppropriateDecoder(const TiffRootIFD* rootIFD,
+                                      const Buffer* file) {
+  const auto id = rootIFD->getID();
+  const std::string& make = id.make;
+
+  // FIXME: magic
+
+  return make == "PENTAX Corporation" ||
+         make == "RICOH IMAGING COMPANY, LTD." || make == "PENTAX";
+}
 
 RawImage PefDecoder::decodeRawInternal() {
   auto raw = mRootIFD->getIFDWithTag(STRIPOFFSETS);
@@ -41,7 +53,7 @@ RawImage PefDecoder::decodeRawInternal() {
   int compression = raw->getEntry(COMPRESSION)->getU32();
 
   if (1 == compression || compression == 32773) {
-    decodeUncompressed(raw, BitOrder_Jpeg);
+    decodeUncompressed(raw, BitOrder_MSB);
     return mRaw;
   }
 
@@ -89,8 +101,8 @@ void PefDecoder::decodeMetaDataInternal(const CameraMetaData* meta) {
   setMetaData(meta, "", iso);
 
   // Read black level
-  if (mRootIFD->hasEntryRecursive((TiffTag)0x200)) {
-    TiffEntry *black = mRootIFD->getEntryRecursive((TiffTag)0x200);
+  if (mRootIFD->hasEntryRecursive(static_cast<TiffTag>(0x200))) {
+    TiffEntry* black = mRootIFD->getEntryRecursive(static_cast<TiffTag>(0x200));
     if (black->count == 4) {
       for (int i = 0; i < 4; i++)
         mRaw->blackLevelSeparate[i] = black->getU32(i);
@@ -98,8 +110,8 @@ void PefDecoder::decodeMetaDataInternal(const CameraMetaData* meta) {
   }
 
   // Set the whitebalance
-  if (mRootIFD->hasEntryRecursive((TiffTag) 0x0201)) {
-    TiffEntry *wb = mRootIFD->getEntryRecursive((TiffTag) 0x0201);
+  if (mRootIFD->hasEntryRecursive(static_cast<TiffTag>(0x0201))) {
+    TiffEntry* wb = mRootIFD->getEntryRecursive(static_cast<TiffTag>(0x0201));
     if (wb->count == 4) {
       mRaw->metadata.wbCoeffs[0] = wb->getU32(0);
       mRaw->metadata.wbCoeffs[1] = wb->getU32(1);

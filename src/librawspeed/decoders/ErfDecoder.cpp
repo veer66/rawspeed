@@ -20,33 +20,30 @@
 */
 
 #include "decoders/ErfDecoder.h"
-#include "common/Common.h"                          // for uint32
-#include "common/Point.h"                           // for iPoint2D
 #include "decompressors/UncompressedDecompressor.h" // for UncompressedDeco...
-#include "io/Buffer.h"                              // for Buffer
-#include "io/Endianness.h"                          // for Endianness
+#include "io/Endianness.h"                          // for Endianness::big
 #include "tiff/TiffEntry.h"                         // for TiffEntry
-#include "tiff/TiffIFD.h"                           // for TiffRootIFD, Tif...
+#include "tiff/TiffIFD.h"                           // for TiffRootIFD
 #include "tiff/TiffTag.h"                           // for TiffTag::EPSONWB
 #include <memory>                                   // for unique_ptr
+#include <string>                                   // for operator==, string
 
 namespace rawspeed {
 
 class CameraMetaData;
 
+bool ErfDecoder::isAppropriateDecoder(const TiffRootIFD* rootIFD,
+                                      const Buffer* file) {
+  const auto id = rootIFD->getID();
+  const std::string& make = id.make;
+
+  // FIXME: magic
+
+  return make == "SEIKO EPSON CORP.";
+}
+
 RawImage ErfDecoder::decodeRawInternal() {
-  auto raw = mRootIFD->getIFDWithTag(STRIPOFFSETS, 1);
-  uint32 width = raw->getEntry(IMAGEWIDTH)->getU32();
-  uint32 height = raw->getEntry(IMAGELENGTH)->getU32();
-  uint32 off = raw->getEntry(STRIPOFFSETS)->getU32();
-  uint32 c2 = raw->getEntry(STRIPBYTECOUNTS)->getU32();
-
-  if (c2 > mFile->getSize() - off) {
-    mRaw->setError("Warning: byte count larger than file size, file probably truncated.");
-  }
-
-  mRaw->dim = iPoint2D(width, height);
-  mRaw->createData();
+  SimpleTiffDecoder::prepareForRawDecoding();
 
   UncompressedDecompressor u(*mFile, off, c2, mRaw);
 
@@ -62,9 +59,11 @@ void ErfDecoder::decodeMetaDataInternal(const CameraMetaData* meta) {
     TiffEntry *wb = mRootIFD->getEntryRecursive(EPSONWB);
     if (wb->count == 256) {
       // Magic values taken directly from dcraw
-      mRaw->metadata.wbCoeffs[0] = (float) wb->getU16(24) * 508.0f * 1.078f / (float)0x10000;
-      mRaw->metadata.wbCoeffs[1] = 1.0f;
-      mRaw->metadata.wbCoeffs[2] = (float) wb->getU16(25) * 382.0f * 1.173f / (float)0x10000;
+      mRaw->metadata.wbCoeffs[0] = static_cast<float>(wb->getU16(24)) * 508.0F *
+                                   1.078F / static_cast<float>(0x10000);
+      mRaw->metadata.wbCoeffs[1] = 1.0F;
+      mRaw->metadata.wbCoeffs[2] = static_cast<float>(wb->getU16(25)) * 382.0F *
+                                   1.173F / static_cast<float>(0x10000);
     }
   }
 }

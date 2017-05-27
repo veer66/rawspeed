@@ -31,8 +31,8 @@ namespace rawspeed {
 
 // Returns len bits as a signed value.
 // Highest bit is a sign bit
-inline int HasselbladDecompressor::getBits(BitPumpMSB32& bs, int len) {
-  int diff = bs.getBits(len);
+inline int HasselbladDecompressor::getBits(BitPumpMSB32* bs, int len) {
+  int diff = bs->getBits(len);
   diff = len > 0 ? HuffmanTable::signExtended(diff, len) : diff;
   if (diff == 65535)
     return -32768;
@@ -45,14 +45,14 @@ void HasselbladDecompressor::decodeScan()
   // Pixels are packed two at a time, not like LJPEG:
   // [p1_length_as_huffman][p2_length_as_huffman][p0_diff_with_length][p1_diff_with_length]|NEXT PIXELS
   for (uint32 y = 0; y < frame.h; y++) {
-    auto *dest = (ushort16 *)mRaw->getData(0, y);
+    auto* dest = reinterpret_cast<ushort16*>(mRaw->getData(0, y));
     int p1 = 0x8000 + pixelBaseOffset;
     int p2 = 0x8000 + pixelBaseOffset;
     for (uint32 x = 0; x < frame.w; x += 2) {
       int len1 = huff[0]->decodeLength(bitStream);
       int len2 = huff[0]->decodeLength(bitStream);
-      p1 += getBits(bitStream, len1);
-      p2 += getBits(bitStream, len2);
+      p1 += getBits(&bitStream, len1);
+      p2 += getBits(&bitStream, len2);
       dest[x] = p1;
       dest[x+1] = p2;
     }

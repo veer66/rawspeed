@@ -51,6 +51,16 @@ bool RafDecoder::isRAF(Buffer* input) {
   return 0 == memcmp(&data[0], magic, magic_size);
 }
 
+bool RafDecoder::isAppropriateDecoder(const TiffRootIFD* rootIFD,
+                                      const Buffer* file) {
+  const auto id = rootIFD->getID();
+  const std::string& make = id.make;
+
+  // FIXME: magic
+
+  return make == "FUJIFILM";
+}
+
 RawImage RafDecoder::decodeRawInternal() {
   auto raw = mRootIFD->getIFDWithTag(FUJI_STRIPOFFSETS);
   uint32 height = 0;
@@ -82,7 +92,8 @@ RawImage RafDecoder::decodeRawInternal() {
     bps = raw->getEntry(FUJI_BITSPERSAMPLE)->getU32();
 
   // x-trans sensors report 14bpp, but data isn't packed so read as 16bpp
-  if (bps == 14) bps = 16;
+  if (bps == 14)
+    bps = 16;
 
   // Some fuji SuperCCD cameras include a second raw image next to the first one
   // that is identical but darker to the first. The two combined can produce
@@ -107,10 +118,9 @@ RawImage RafDecoder::decodeRawInternal() {
   } else {
     if (hints.has("jpeg32_bitorder")) {
       u.readUncompressedRaw(mRaw->dim, pos, width * bps / 8, bps,
-                            BitOrder_Jpeg32);
+                            BitOrder_MSB32);
     } else {
-      u.readUncompressedRaw(mRaw->dim, pos, width * bps / 8, bps,
-                            BitOrder_Plain);
+      u.readUncompressedRaw(mRaw->dim, pos, width * bps / 8, bps, BitOrder_LSB);
     }
   }
 
@@ -176,13 +186,15 @@ void RafDecoder::decodeMetaDataInternal(const CameraMetaData* meta) {
     rotated->metadata = mRaw->metadata;
     rotated->metadata.fujiRotationPos = rotationPos;
 
-    int dest_pitch = (int)rotated->pitch / 2;
-    auto *dst = (ushort16 *)rotated->getData(0, 0);
+    int dest_pitch = static_cast<int>(rotated->pitch) / 2;
+    auto* dst = reinterpret_cast<ushort16*>(rotated->getData(0, 0));
 
     for (int y = 0; y < new_size.y; y++) {
-      auto *src = (ushort16 *)mRaw->getData(crop_offset.x, crop_offset.y + y);
+      auto* src = reinterpret_cast<ushort16*>(
+          mRaw->getData(crop_offset.x, crop_offset.y + y));
       for (int x = 0; x < new_size.x; x++) {
-        int h, w;
+        int h;
+        int w;
         if (alt_layout) { // Swapped x and y
           h = rotatedsize - (new_size.y + 1 - y + (x >> 1));
           w = ((x+1) >> 1) + y;

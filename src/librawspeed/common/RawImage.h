@@ -22,10 +22,15 @@
 
 #include "rawspeedconfig.h"
 
+#include "ThreadSafetyAnalysis.h"      // for GUARDED_BY, REQUIRES
 #include "common/Common.h"             // for uint32, uchar8, ushort16, wri...
+#include "common/ErrorLog.h"           // for ErrorLog
+#include "common/Mutex.h"              // for Mutex
 #include "common/Point.h"              // for iPoint2D, iRectangle2D (ptr o...
+#include "common/TableLookUp.h"        // for TableLookUp
 #include "metadata/BlackArea.h"        // for BlackArea
 #include "metadata/ColorFilterArray.h" // for ColorFilterArray
+#include <memory>                      // for unique_ptr, operator==
 #include <string>                      // for string
 #include <vector>                      // for vector
 
@@ -47,14 +52,7 @@ public:
     SCALE_VALUES = 1, FIX_BAD_PIXELS = 2, APPLY_LOOKUP = 3 | 0x1000, FULL_IMAGE = 0x1000
   };
 
-  RawImageWorker(RawImageData *img, RawImageWorkerTask task, int start_y, int end_y);
-#ifdef HAVE_PTHREAD
-  ~RawImageWorker();
-  void startThread();
-  void waitForThread();
-#endif
-  void performTask();
-protected:
+private:
 #ifdef HAVE_PTHREAD
   pthread_t threadid;
   pthread_attr_t attr;
@@ -63,21 +61,19 @@ protected:
   RawImageWorkerTask task;
   int start_y;
   int end_y;
+
+public:
+  RawImageWorker(RawImageData* img, RawImageWorkerTask task, int start_y,
+                 int end_y);
+#ifdef HAVE_PTHREAD
+  ~RawImageWorker();
+  void startThread();
+  void waitForThread();
+#endif
+  void performTask();
 };
 
 void* RawImageWorkerThread(void* _this);
-
-class TableLookUp {
-public:
-  TableLookUp(int ntables, bool dither);
-  ~TableLookUp();
-  void setTable(int ntable, const ushort16* table, int nfilled);
-  ushort16* getTable(int n);
-  const int ntables;
-  ushort16* tables;
-  const bool dither;
-};
-
 
 class ImageMetaData {
 public:
@@ -107,12 +103,9 @@ public:
 
   // ISO speed. If known the value is set, otherwise it will be '0'.
   int isoSpeed;
-
-private:
 };
 
-class RawImageData
-{
+class RawImageData : public ErrorLog {
   friend class RawImageWorker;
 public:
   virtual ~RawImageData();
@@ -126,7 +119,7 @@ public:
   void blitFrom(const RawImage& src, const iPoint2D& srcPos,
                 const iPoint2D& size, const iPoint2D& destPos);
   rawspeed::RawImageType getDataType() const { return dataType; }
-  uchar8* getData();
+  uchar8* getData() const;
   uchar8* getData(uint32 x, uint32 y);    // Not super fast, but safe. Don't use per pixel.
   uchar8* getDataUncropped(uint32 x, uint32 y);
   void subFrame(iRectangle2D cropped);
@@ -137,12 +130,11 @@ public:
   virtual void calculateBlackAreas() = 0;
   virtual void setWithLookUp(ushort16 value, uchar8* dst, uint32* random) = 0;
   void sixteenBitLookup();
-  void transferBadPixelsToMap();
-  void fixBadPixels();
-  void copyErrorsFrom(const RawImage& other);
+  void transferBadPixelsToMap() REQUIRES(!mBadPixelMutex);
+  void fixBadPixels() REQUIRES(!mBadPixelMutex);
   void expandBorder(iRectangle2D validData);
-  void setTable(const ushort16* table, int nfilled, bool dither);
-  void setTable(TableLookUp *t);
+  void setTable(const std::vector<ushort16>& table_, bool dither);
+  void setTable(std::unique_ptr<TableLookUp> t);
 
   bool isAllocated() {return !!data;}
   void createBadPixelMap();
@@ -159,23 +151,22 @@ public:
   int blackLevelSeparate[4];
   int whitePoint = 65536;
   std::vector<BlackArea> blackAreas;
-  /* Vector containing silent errors that occurred doing decoding, that may have lead to */
-  /* an incomplete image. */
-  std::vector<std::string> errors;
-  void setError(const std::string& err);
+
   /* Vector containing the positions of bad pixels */
   /* Format is x | (y << 16), so maximum pixel position is 65535 */
-  std::vector<uint32> mBadPixelPositions;    // Positions of zeroes that must be interpolated
+  // Positions of zeroes that must be interpolated
+  std::vector<uint32> mBadPixelPositions GUARDED_BY(mBadPixelMutex);
   uchar8* mBadPixelMap = nullptr;
   uint32 mBadPixelMapPitch = 0;
   bool mDitherScale =
       true; // Should upscaling be done with dither to minimize banding?
   ImageMetaData metadata;
 
-#ifdef HAVE_PTHREAD
-  pthread_mutex_t errMutex;   // Mutex for 'errors'
-  pthread_mutex_t mBadPixelMutex;   // Mutex for 'mBadPixelPositions, must be used if more than 1 thread is accessing vector
-#endif
+  Mutex mBadPixelMutex; // Mutex for 'mBadPixelPositions, must be used if more
+                        // than 1 thread is accessing vector
+
+private:
+  uint32 dataRefCount GUARDED_BY(mymutex) = 0;
 
 protected:
   RawImageType dataType;
@@ -186,17 +177,14 @@ protected:
   virtual void fixBadPixel( uint32 x, uint32 y, int component = 0) = 0;
   void fixBadPixelsThread(int start_y, int end_y);
   void startWorker(RawImageWorker::RawImageWorkerTask task, bool cropped );
-  uint32 dataRefCount = 0;
   uchar8* data = nullptr;
   uint32 cpp = 1; // Components per pixel
   uint32 bpp = 0; // Bytes per pixel.
   friend class RawImage;
   iPoint2D mOffset;
   iPoint2D uncropped_dim;
-  TableLookUp* table = nullptr;
-#ifdef HAVE_PTHREAD
-  pthread_mutex_t mymutex;
-#endif
+  std::unique_ptr<TableLookUp> table;
+  Mutex mymutex;
 };
 
 class RawImageDataU16 final : public RawImageData {
@@ -262,19 +250,21 @@ inline RawImage RawImage::create(RawImageType type)  {
       return RawImage(new RawImageDataFloat());
     default:
       writeLog(DEBUG_PRIO_ERROR, "RawImage::create: Unknown Image type!");
+      __builtin_unreachable();
+
   }
-  return RawImage(nullptr);
 }
 
-inline RawImage RawImage::create(const iPoint2D &dim, RawImageType type,
-                                 uint32 componentsPerPixel) {
+inline RawImage RawImage::create(const iPoint2D& dim, RawImageType type, uint32 componentsPerPixel) {
   switch (type) {
-    case TYPE_USHORT16:
-      return RawImage(new RawImageDataU16(dim, componentsPerPixel));
-    default:
-      writeLog(DEBUG_PRIO_ERROR, "RawImage::create: Unknown Image type!");
+  case TYPE_USHORT16:
+    return RawImage(new RawImageDataU16(dim, componentsPerPixel));
+  case TYPE_FLOAT32:
+    return RawImage(new RawImageDataFloat(dim, componentsPerPixel));
+  default:
+    writeLog(DEBUG_PRIO_ERROR, "RawImage::create: Unknown Image type!");
+    __builtin_unreachable();
   }
-  return RawImage(nullptr);
 }
 
 // setWithLookUp will set a single pixel by using the lookup table if supplied,
@@ -282,13 +272,13 @@ inline RawImage RawImage::create(const iPoint2D &dim, RawImageType type,
 // a value that will be used to store a random counter that can be reused between calls.
 // this needs to be inline to speed up tight decompressor loops
 inline void RawImageDataU16::setWithLookUp(ushort16 value, uchar8* dst, uint32* random) {
-  auto *dest = (ushort16 *)dst;
+  auto* dest = reinterpret_cast<ushort16*>(dst);
   if (table == nullptr) {
     *dest = value;
     return;
   }
   if (table->dither) {
-    auto* t = (const uint32*)table->tables;
+    auto* t = reinterpret_cast<const uint32*>(table->tables.data());
     uint32 lookup = t[value];
     uint32 base = lookup & 0xffff;
     uint32 delta = lookup >> 16;
@@ -299,8 +289,7 @@ inline void RawImageDataU16::setWithLookUp(ushort16 value, uchar8* dst, uint32* 
     *dest = pix;
     return;
   }
-  auto *t = (ushort16 *)table->tables;
-  *dest = t[value];
+  *dest = table->tables[value];
 }
 
 } // namespace rawspeed

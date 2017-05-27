@@ -32,19 +32,24 @@ class CameraMetaData;
 class Buffer;
 
 class MrwDecoder final : public RawDecoder {
+  TiffRootIFDOwner rootIFD;
+
+  uint32 raw_width;
+  uint32 raw_height;
+  uint32 data_offset;
+  uint32 packed;
+  float wb_coeffs[4];
+
 public:
   explicit MrwDecoder(Buffer* file);
   RawImage decodeRawInternal() override;
   void checkSupportInternal(const CameraMetaData* meta) override;
   void decodeMetaDataInternal(const CameraMetaData* meta) override;
-  static int isMRW(Buffer* input);
+  static int isMRW(const Buffer* input);
 
 protected:
   int getDecoderVersion() const override { return 0; }
   void parseHeader();
-  uint32 raw_width, raw_height, data_offset, packed;
-  TiffRootIFDOwner rootIFD;
-  float wb_coeffs[4];
 };
 
 } // namespace rawspeed

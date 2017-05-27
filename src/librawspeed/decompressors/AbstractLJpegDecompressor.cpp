@@ -41,13 +41,19 @@ void AbstractLJpegDecompressor::decode() {
     m = getNextMarker(true);
 
     switch (m) {
-    case M_DHT:  parseDHT(); break;
-    case M_SOF3: parseSOF(&frame); break;
-    case M_SOS:  parseSOS(); break;
+    case M_DHT:
+      parseDHT();
+      break;
+    case M_SOF3:
+      parseSOF(&frame);
+      break;
+    case M_SOS:
+      parseSOS();
+      break;
     case M_DQT:
       ThrowRDE("Not a valid RAW file.");
       break;
-    default:  // Just let it skip to next marker
+    default: // Just let it skip to next marker
       break;
     }
   } while (m != M_EOI);
@@ -173,7 +179,8 @@ void AbstractLJpegDecompressor::parseDHT() {
 }
 
 JpegMarker AbstractLJpegDecompressor::getNextMarker(bool allowskip) {
-  uchar8 c0, c1 = input.getByte();
+  uchar8 c0;
+  uchar8 c1 = input.getByte();
   do {
     c0 = c1;
     c1 = input.getByte();
@@ -182,7 +189,7 @@ JpegMarker AbstractLJpegDecompressor::getNextMarker(bool allowskip) {
   if (!(c0 == 0xFF && c1 != 0 && c1 != 0xFF))
     ThrowRDE("(Noskip) Expected marker not found. Propably corrupt file.");
 
-  return (JpegMarker)c1;
+  return static_cast<JpegMarker>(c1);
 }
 
 } // namespace rawspeed

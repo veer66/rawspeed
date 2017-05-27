@@ -30,10 +30,21 @@
 #include "tiff/TiffIFD.h"                         // for TiffRootIFD, TiffIFD
 #include "tiff/TiffTag.h"                         // for TiffTag::ASSHOTNEU...
 #include <memory>                                 // for unique_ptr
+#include <string>                                 // for operator==, string
 
 namespace rawspeed {
 
 class CameraMetaData;
+
+bool ThreefrDecoder::isAppropriateDecoder(const TiffRootIFD* rootIFD,
+                                          const Buffer* file) {
+  const auto id = rootIFD->getID();
+  const std::string& make = id.make;
+
+  // FIXME: magic
+
+  return make == "Hasselblad";
+}
 
 RawImage ThreefrDecoder::decodeRawInternal() {
   auto raw = mRootIFD->getIFDWithTag(STRIPOFFSETS, 1);
@@ -67,7 +78,7 @@ void ThreefrDecoder::decodeMetaDataInternal(const CameraMetaData* meta) {
     TiffEntry *wb = mRootIFD->getEntryRecursive(ASSHOTNEUTRAL);
     if (wb->count == 3) {
       for (uint32 i=0; i<3; i++)
-        mRaw->metadata.wbCoeffs[i] = 1.0f/wb->getFloat(i);
+        mRaw->metadata.wbCoeffs[i] = 1.0F / wb->getFloat(i);
     }
   }
 }

@@ -40,6 +40,7 @@
 #include <cstdlib>                                  // for abs
 #include <cstring>                                  // for memset
 #include <memory>                                   // for unique_ptr
+#include <string>                                   // for operator==, string
 
 using std::unique_ptr;
 using std::min;
@@ -48,6 +49,17 @@ using std::signbit;
 namespace rawspeed {
 
 class CameraMetaData;
+
+bool OrfDecoder::isAppropriateDecoder(const TiffRootIFD* rootIFD,
+                                      const Buffer* file) {
+  const auto id = rootIFD->getID();
+  const std::string& make = id.make;
+
+  // FIXME: magic
+
+  return make == "OLYMPUS IMAGING CORP." || make == "OLYMPUS CORPORATION" ||
+         make == "OLYMPUS OPTICAL CO.,LTD";
+}
 
 RawImage OrfDecoder::decodeRawInternal() {
   auto raw = mRootIFD->getIFDWithTag(STRIPOFFSETS);
@@ -87,7 +99,7 @@ RawImage OrfDecoder::decodeRawInternal() {
     if (offsets->count != 1 || hints.has("force_uncompressed"))
       decodeUncompressed(input, width, height, size);
     else
-      decodeCompressed(input, width, height);
+      decodeCompressed(&input, width, height);
   } catch (IOException &e) {
      mRaw->setError(e.what());
   }
@@ -95,13 +107,15 @@ RawImage OrfDecoder::decodeRawInternal() {
   return mRaw;
 }
 
-void OrfDecoder::decodeUncompressed(ByteStream& s, uint32 w, uint32 h, uint32 size) {
+void OrfDecoder::decodeUncompressed(const ByteStream& s, uint32 w, uint32 h,
+                                    uint32 size) {
   UncompressedDecompressor u(s, mRaw);
   if (hints.has("packed_with_control"))
     u.decode12BitRaw<little, false, true>(w, h);
   else if (hints.has("jpeg32_bitorder")) {
-    iPoint2D dimensions(w, h), pos(0, 0);
-    u.readUncompressedRaw(dimensions, pos, w * 12 / 8, 12, BitOrder_Jpeg32);
+    iPoint2D dimensions(w, h);
+    iPoint2D pos(0, 0);
+    u.readUncompressedRaw(dimensions, pos, w * 12 / 8, 12, BitOrder_MSB32);
   } else if (size >= w*h*2) { // We're in an unpacked raw
     if (s.isInNativeByteOrder())
       u.decodeRawUnpacked<12, little>(w, h);
@@ -121,9 +135,20 @@ void OrfDecoder::decodeUncompressed(ByteStream& s, uint32 w, uint32 h, uint32 si
  * is based on the output of all previous pixel (bar the first four)
  */
 
-void OrfDecoder::decodeCompressed(ByteStream& s, uint32 w, uint32 h) {
-  int nbits, sign, low, high, i, left0, nw0, left1, nw1;
-  int acarry0[3], acarry1[3], pred, diff;
+void OrfDecoder::decodeCompressed(ByteStream* s, uint32 w, uint32 h) {
+  int nbits;
+  int sign;
+  int low;
+  int high;
+  int i;
+  int left0;
+  int nw0;
+  int left1;
+  int nw1;
+  int acarry0[3];
+  int acarry1[3];
+  int pred;
+  int diff;
 
   uchar8* data = mRaw->getData();
   int pitch = mRaw->pitch;
@@ -140,19 +165,21 @@ void OrfDecoder::decodeCompressed(ByteStream& s, uint32 w, uint32 h) {
   }
   left0 = nw0 = left1 = nw1 = 0;
 
-  s.skipBytes(7);
-  BitPumpMSB bits(s);
+  s->skipBytes(7);
+  BitPumpMSB bits(*s);
 
   for (uint32 y = 0; y < h; y++) {
     memset(acarry0, 0, sizeof acarry0);
     memset(acarry1, 0, sizeof acarry1);
-    auto *dest = (ushort16 *)&data[y * pitch];
+    auto* dest = reinterpret_cast<ushort16*>(&data[y * pitch]);
     bool y_border = y < 2;
     bool border = true;
     for (uint32 x = 0; x < w; x++) {
       bits.fill();
       i = 2 * (acarry0[2] < 3);
-      for (nbits = 2 + i; (ushort16) acarry0[0] >> (nbits + i); nbits++);
+      for (nbits = 2 + i; static_cast<ushort16>(acarry0[0]) >> (nbits + i);
+           nbits++)
+        ;
 
       int b = bits.peekBitsNoFill(15);
       sign = (b >> 14) * -1;
@@ -179,7 +206,7 @@ void OrfDecoder::decodeCompressed(ByteStream& s, uint32 w, uint32 h) {
           if (y_border)
             pred = left0;
           else {
-            pred = dest[-pitch + ((int)x)];
+            pred = dest[-pitch + (static_cast<int>(x))];
             nw0 = pred;
           }
         }
@@ -189,7 +216,7 @@ void OrfDecoder::decodeCompressed(ByteStream& s, uint32 w, uint32 h) {
       } else {
         // Have local variables for values used several tiles
         // (having a "ushort16 *dst_up" that caches dest[-pitch+((int)x)] is actually slower, probably stack spill or aliasing)
-        int up  = dest[-pitch+((int)x)];
+        int up = dest[-pitch + (static_cast<int>(x))];
         int leftMinusNw = left0 - nw0;
         int upMinusNw = up - nw0;
         // Check if sign is different, and they are both not zero
@@ -212,7 +239,9 @@ void OrfDecoder::decodeCompressed(ByteStream& s, uint32 w, uint32 h) {
       x += 1;
       bits.fill();
       i = 2 * (acarry1[2] < 3);
-      for (nbits = 2 + i; (ushort16) acarry1[0] >> (nbits + i); nbits++);
+      for (nbits = 2 + i; static_cast<ushort16>(acarry1[0]) >> (nbits + i);
+           nbits++)
+        ;
       b = bits.peekBitsNoFill(15);
       sign = (b >> 14) * -1;
       low  = (b >> 12) & 3;
@@ -238,13 +267,13 @@ void OrfDecoder::decodeCompressed(ByteStream& s, uint32 w, uint32 h) {
           if (y_border)
             pred = left1;
           else {
-            pred = dest[-pitch + ((int)x)];
+            pred = dest[-pitch + (static_cast<int>(x))];
             nw1 = pred;
           }
         }
         dest[x] = left1 = pred + ((diff * 4) | low);
       } else {
-        int up  = dest[-pitch+((int)x)];
+        int up = dest[-pitch + (static_cast<int>(x))];
         int leftMinusNw = left1 - nw1;
         int upMinusNw = up - nw1;
 
@@ -277,9 +306,11 @@ void OrfDecoder::decodeMetaDataInternal(const CameraMetaData* meta) {
 
   if (mRootIFD->hasEntryRecursive(OLYMPUSREDMULTIPLIER) &&
       mRootIFD->hasEntryRecursive(OLYMPUSBLUEMULTIPLIER)) {
-    mRaw->metadata.wbCoeffs[0] = (float) mRootIFD->getEntryRecursive(OLYMPUSREDMULTIPLIER)->getU16();
-    mRaw->metadata.wbCoeffs[1] = 256.0f;
-    mRaw->metadata.wbCoeffs[2] = (float) mRootIFD->getEntryRecursive(OLYMPUSBLUEMULTIPLIER)->getU16();
+    mRaw->metadata.wbCoeffs[0] = static_cast<float>(
+        mRootIFD->getEntryRecursive(OLYMPUSREDMULTIPLIER)->getU16());
+    mRaw->metadata.wbCoeffs[1] = 256.0F;
+    mRaw->metadata.wbCoeffs[2] = static_cast<float>(
+        mRootIFD->getEntryRecursive(OLYMPUSBLUEMULTIPLIER)->getU16());
   } else {
     // Newer cameras process the Image Processing SubIFD in the makernote
     if(mRootIFD->hasEntryRecursive(OLYMPUSIMAGEPROCESSING)) {
@@ -290,18 +321,20 @@ void OrfDecoder::decodeMetaDataInternal(const CameraMetaData* meta) {
                                      img_entry->getU32());
 
         // Get the WB
-        if(image_processing.hasEntry((TiffTag) 0x0100)) {
-          TiffEntry *wb = image_processing.getEntry((TiffTag) 0x0100);
+        if (image_processing.hasEntry(static_cast<TiffTag>(0x0100))) {
+          TiffEntry* wb =
+              image_processing.getEntry(static_cast<TiffTag>(0x0100));
           if (wb->count == 2 || wb->count == 4) {
             mRaw->metadata.wbCoeffs[0] = wb->getFloat(0);
-            mRaw->metadata.wbCoeffs[1] = 256.0f;
+            mRaw->metadata.wbCoeffs[1] = 256.0F;
             mRaw->metadata.wbCoeffs[2] = wb->getFloat(1);
           }
         }
 
         // Get the black levels
-        if(image_processing.hasEntry((TiffTag) 0x0600)) {
-          TiffEntry *blackEntry = image_processing.getEntry((TiffTag) 0x0600);
+        if (image_processing.hasEntry(static_cast<TiffTag>(0x0600))) {
+          TiffEntry* blackEntry =
+              image_processing.getEntry(static_cast<TiffTag>(0x0600));
           // Order is assumed to be RGGB
           if (blackEntry->count == 4) {
             for (int i = 0; i < 4; i++) {

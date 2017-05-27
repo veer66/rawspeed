@@ -42,13 +42,13 @@ const uint32 TiffEntry::datashifts[] = {0, 0, 0, 1, 2, 3, 0,
                                         0, 1, 2, 3, 2, 3, 2};
 //                                  0-1-2-3-4-5-6-7-8-9-10-11-12-13
 
-TiffEntry::TiffEntry(TiffIFD* parent_, ByteStream& bs) : parent(parent_) {
-  tag = (TiffTag)bs.getU16();
-  const ushort16 numType = bs.getU16();
+TiffEntry::TiffEntry(TiffIFD* parent_, ByteStream* bs) : parent(parent_) {
+  tag = static_cast<TiffTag>(bs->getU16());
+  const ushort16 numType = bs->getU16();
   if (numType > TIFF_OFFSET)
     ThrowTPE("Error reading TIFF structure. Unknown Type 0x%x encountered.", numType);
-  type = (TiffDataType) numType;
-  count = bs.getU32();
+  type = static_cast<TiffDataType>(numType);
+  count = bs->getU32();
 
   // check for count << datashift overflow
   if (count > UINT32_MAX >> datashifts[type])
@@ -58,11 +58,11 @@ TiffEntry::TiffEntry(TiffIFD* parent_, ByteStream& bs) : parent(parent_) {
   uint32 data_offset = UINT32_MAX;
 
   if (byte_size <= 4) {
-    data_offset = bs.getPosition();
-    data = bs.getSubStream(bs.getPosition(), byte_size);
-    bs.skipBytes(4);
+    data_offset = bs->getPosition();
+    data = bs->getSubStream(bs->getPosition(), byte_size);
+    bs->skipBytes(4);
   } else {
-    data_offset = bs.getU32();
+    data_offset = bs->getU32();
     if (type == TIFF_OFFSET || isIn(tag, {DNGPRIVATEDATA, MAKERNOTE, MAKERNOTE_ALT, FUJI_RAW_IFD, SUBIFDS, EXIFIFDPOINTER})) {
       // preserve offset for SUB_IFD/EXIF/MAKER_NOTE data
 #if 0
@@ -73,11 +73,11 @@ TiffEntry::TiffEntry(TiffIFD* parent_, ByteStream& bs) : parent(parent_) {
       // point to outside data, which is forbidden due to the TIFF/DNG spec but
       // may happen none the less (see e.g. "old" ORF files like EX-1, note:
       // the tags outside of the maker note area are currently not used anyway)
-      data = bs;
+      data = *bs;
       data.setPosition(data_offset);
 #endif
     } else {
-      data = bs.getSubStream(data_offset, byte_size);
+      data = bs->getSubStream(data_offset, byte_size);
     }
   }
 }
@@ -105,9 +105,19 @@ bool __attribute__((pure)) TiffEntry::isString() const {
 }
 
 bool __attribute__((pure)) TiffEntry::isFloat() const {
-  return  (type == TIFF_FLOAT || type == TIFF_DOUBLE || type == TIFF_RATIONAL ||
-           type == TIFF_SRATIONAL || type == TIFF_LONG || type == TIFF_SLONG ||
-           type == TIFF_SHORT || type == TIFF_SSHORT);
+  switch (type) {
+  case TIFF_FLOAT:
+  case TIFF_DOUBLE:
+  case TIFF_RATIONAL:
+  case TIFF_SRATIONAL:
+  case TIFF_LONG:
+  case TIFF_SLONG:
+  case TIFF_SHORT:
+  case TIFF_SSHORT:
+    return true;
+  default:
+    return false;
+  }
 }
 
 uchar8 TiffEntry::getByte(uint32 index) const {
@@ -136,12 +146,20 @@ short16 TiffEntry::getI16(uint32 index) const {
 uint32 TiffEntry::getU32(uint32 index) const {
   if (type == TIFF_SHORT)
     return getU16(index);
-  if (!(type == TIFF_LONG || type == TIFF_OFFSET || type == TIFF_BYTE ||
-        type == TIFF_UNDEFINED || type == TIFF_RATIONAL ||
-        type == TIFF_SRATIONAL)) {
+
+  switch (type) {
+  case TIFF_LONG:
+  case TIFF_OFFSET:
+  case TIFF_BYTE:
+  case TIFF_UNDEFINED:
+  case TIFF_RATIONAL:
+  case TIFF_SRATIONAL:
+    break;
+  default:
     ThrowTPE("Wrong type %u encountered. Expected Long, Offset, Rational or "
              "Undefined on 0x%x",
              type, tag);
+    break;
   }
 
   return data.peek<uint32>(index);
@@ -168,22 +186,24 @@ float TiffEntry::getFloat(uint32 index) const {
   case TIFF_DOUBLE: return data.peek<double>(index);
   case TIFF_FLOAT:  return data.peek<float>(index);
   case TIFF_LONG:
-  case TIFF_SHORT:  return (float)getU32(index);
+  case TIFF_SHORT:
+    return static_cast<float>(getU32(index));
   case TIFF_SLONG:
-  case TIFF_SSHORT: return (float)getI32(index);
+  case TIFF_SSHORT:
+    return static_cast<float>(getI32(index));
   case TIFF_RATIONAL: {
     uint32 a = getU32(index*2);
     uint32 b = getU32(index*2+1);
-    return b ? (float) a/b : 0.f;
+    return b != 0 ? static_cast<float>(a) / b : 0.0F;
   }
   case TIFF_SRATIONAL: {
-    auto a = (int)getU32(index * 2);
-    auto b = (int)getU32(index * 2 + 1);
-    return b ? (float) a/b : 0.f;
+    auto a = static_cast<int>(getU32(index * 2));
+    auto b = static_cast<int>(getU32(index * 2 + 1));
+    return b ? static_cast<float>(a) / b : 0.0F;
   }
   default:
     // unreachable
-    return 0.0f;
+    return 0.0F;
   }
 }
 
@@ -191,8 +211,11 @@ string TiffEntry::getString() const {
   if (type != TIFF_ASCII && type != TIFF_BYTE)
     ThrowTPE("Wrong type 0x%x encountered. Expected Ascii or Byte", type);
 
-  const char* s = data.peekString();
-  return string(s, strnlen(s, count));
+  // *NOT* ByteStream::peekString() !
+  const auto bufSize = data.getRemainSize();
+  const auto* buf = data.peekData(bufSize);
+  const auto* s = reinterpret_cast<const char*>(buf);
+  return string(s, strnlen(s, bufSize));
 }
 
 const DataBuffer &TiffEntry::getRootIfdData() const {

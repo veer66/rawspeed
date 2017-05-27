@@ -27,7 +27,6 @@
 #include <cstdio>          // for snprintf, size_t, fclose, fopen, fprintf
 #include <cstdlib>         // for system
 #include <fstream>         // IWYU pragma: keep
-#include <iomanip>         // for operator<<, setw
 #include <iostream>        // for cout, cerr, left, internal
 #include <map>             // for map
 #include <memory>          // for unique_ptr, allocator
@@ -38,15 +37,21 @@
 #include <vector>          // for vector
 // IWYU pragma: no_include <ext/alloc_traits.h>
 
+#if !defined(__has_feature) || !__has_feature(thread_sanitizer)
+#include <iomanip> // for operator<<, setw
+#endif
+
 #ifdef _OPENMP
 #include <omp.h>
 #endif
 
 // define this function, it is only declared in rawspeed:
 #ifdef _OPENMP
-int rawspeed_get_number_of_processor_cores() { return omp_get_num_procs(); }
+extern "C" int rawspeed_get_number_of_processor_cores() {
+  return omp_get_num_procs();
+}
 #else
-int __attribute__((const)) rawspeed_get_number_of_processor_cores() {
+extern "C" int __attribute__((const)) rawspeed_get_number_of_processor_cores() {
   return 1;
 }
 #endif
@@ -59,18 +64,12 @@ using std::ifstream;
 using std::istreambuf_iterator;
 using std::ofstream;
 using std::cout;
-using std::setw;
-using std::left;
 using std::endl;
-using std::unique_ptr;
-using std::internal;
 using std::map;
 using std::cerr;
 using rawspeed::CameraMetaData;
 using rawspeed::FileReader;
-using rawspeed::Buffer;
 using rawspeed::RawParser;
-using rawspeed::RawDecoder;
 using rawspeed::RawImage;
 using rawspeed::uchar8;
 using rawspeed::uint32;
@@ -83,14 +82,22 @@ using rawspeed::isAligned;
 using rawspeed::roundUp;
 using rawspeed::RawspeedException;
 
+#if !defined(__has_feature) || !__has_feature(thread_sanitizer)
+using std::setw;
+using std::left;
+using std::internal;
+#endif
+
 namespace rawspeed {
 
 namespace rstest {
 
-std::string img_hash(rawspeed::RawImage& r);
+std::string img_hash(const rawspeed::RawImage& r);
 
 void writePPM(const rawspeed::RawImage& raw, const std::string& fn);
 void writePFM(const rawspeed::RawImage& raw, const std::string& fn);
+
+md5::md5_state imgDataHash(const rawspeed::RawImage& raw);
 
 void writeImage(const rawspeed::RawImage& raw, const std::string& fn);
 
@@ -117,12 +124,35 @@ struct Timer {
   }
 };
 
+// yes, this is not cool. but i see no way to compute the hash of the
+// full image, without duplicating image, and copying excluding padding
+md5::md5_state imgDataHash(const RawImage& raw) {
+  md5::md5_state ret = md5::md5_init;
+
+  const iPoint2D dimUncropped = raw->getUncroppedDim();
+
+  vector<md5::md5_state> line_hashes;
+  line_hashes.resize(dimUncropped.y, md5::md5_init);
+
+  for (int j = 0; j < dimUncropped.y; j++) {
+    auto* d = raw->getDataUncropped(0, j);
+    md5::md5_hash(d, raw->pitch - raw->padding, &line_hashes[j]);
+  }
+
+  md5::md5_hash(reinterpret_cast<const uint8_t*>(&line_hashes[0]),
+                sizeof(line_hashes[0]) * line_hashes.size(), &ret);
+
+  return ret;
+}
+
 #pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpragmas"
+#pragma GCC diagnostic ignored "-Wunknown-warning-option"
 #pragma GCC diagnostic ignored "-Wunknown-pragmas"
 #pragma GCC diagnostic ignored "-Wframe-larger-than="
 #pragma GCC diagnostic ignored "-Wstack-usage="
 
-string img_hash(RawImage &r) {
+string img_hash(const RawImage& r) {
   ostringstream oss;
   char line[1024];
 
@@ -181,31 +211,20 @@ string img_hash(RawImage &r) {
   APPEND("pixel_aspect_ratio: %f\n", r->metadata.pixelAspectRatio);
 
   APPEND("badPixelPositions: ");
-  for (uint32 p : r->mBadPixelPositions)
-    APPEND("%d, ", p);
+  {
+    MutexLocker guard(&r->mBadPixelMutex);
+    for (uint32 p : r->mBadPixelPositions)
+      APPEND("%d, ", p);
+  }
 
   APPEND("\n");
 
-
-  // yes, this is not cool. but i see no way to compute the hash of the
-  // full image, without duplicating image, and copying excluding padding
-  rawspeed::md5::md5_state hash_of_line_hashes = rawspeed::md5::md5_init;
-  {
-    vector<rawspeed::md5::md5_state> line_hashes;
-    line_hashes.resize(dimUncropped.y, rawspeed::md5::md5_init);
-    for (int j = 0; j < dimUncropped.y; j++) {
-      auto* d = r->getDataUncropped(0, j);
-      rawspeed::md5::md5_hash(d, r->pitch - r->padding, line_hashes[j]);
-    }
-    rawspeed::md5::md5_hash((const uint8_t*)&line_hashes[0],
-                            sizeof(line_hashes[0]) * line_hashes.size(),
-                            hash_of_line_hashes);
-  }
-
+  rawspeed::md5::md5_state hash_of_line_hashes = imgDataHash(r);
   APPEND("md5sum of per-line md5sums: %s\n",
          rawspeed::md5::hash_to_string(hash_of_line_hashes).c_str());
 
-  for (const string& e : r->errors)
+  const auto errors = r->getErrors();
+  for (const string& e : errors)
     APPEND("WARNING: [rawspeed] %s\n", e.c_str());
 
 #undef APPEND
@@ -227,7 +246,7 @@ void writePPM(const RawImage& raw, const string& fn) {
 
   // Write pixels
   for (int y = 0; y < height; ++y) {
-    auto* row = (unsigned short*)(raw->getData(0, y));
+    auto* row = reinterpret_cast<unsigned short*>(raw->getData(0, y));
     // PPM is big-endian
     for (int x = 0; x < width; ++x)
       row[x] = getU16BE(row + x);
@@ -249,8 +268,22 @@ void writePFM(const RawImage& raw, const string& fn) {
 
   // make sure that data starts at aligned offset. for sse
   static const auto dataAlignment = 16;
-  const int sseLen = roundUp(len, dataAlignment);
-  len += fprintf(f, "%0*i\n", sseLen - len - 1, 0);
+
+  // regardless of padding, we need to write \n separator
+  const int realLen = len + 1;
+  // the first byte after that \n will be aligned
+  const int paddedLen = roundUp(realLen, dataAlignment);
+  assert(paddedLen > len);
+  assert(isAligned(paddedLen, dataAlignment));
+
+  // how much padding?
+  const int padding = paddedLen - realLen;
+  assert(padding >= 0);
+  assert(isAligned(realLen + padding, dataAlignment));
+
+  // and actually write padding + new line
+  len += fprintf(f, "%0*i\n", padding, 0);
+  assert(paddedLen == len);
 
   // did we write a multiple of an alignment value?
   assert(isAligned(len, dataAlignment));
@@ -263,7 +296,7 @@ void writePFM(const RawImage& raw, const string& fn) {
   for (int y = 0; y < height; ++y) {
     // NOTE: pfm has rows in reverse order
     const int row_in = height - 1 - y;
-    auto* row = (float*)(raw->getData(0, row_in));
+    auto* row = reinterpret_cast<float*>(raw->getData(0, row_in));
 
     // PFM can have any endiannes, let's write little-endian
     for (int x = 0; x < width; ++x)
@@ -284,7 +317,6 @@ void writeImage(const RawImage& raw, const string& fn) {
     break;
   default:
     __builtin_unreachable();
-    break;
   }
 }
 
@@ -297,30 +329,33 @@ size_t process(const string& filename, const CameraMetaData* metadata,
   // if not creating and hash is missing -> skip as well
   ifstream hf(hashfile);
   if (hf.good() == create) {
+#if !defined(__has_feature) || !__has_feature(thread_sanitizer)
 #ifdef _OPENMP
 #pragma omp critical(io)
 #endif
     cout << left << setw(55) << filename << ": hash "
          << (create ? "exists" : "missing") << ", skipping" << endl;
+#endif
     return 0;
   }
 
 // to narrow down the list of files that could have causes the crash
+#if !defined(__has_feature) || !__has_feature(thread_sanitizer)
 #ifdef _OPENMP
 #pragma omp critical(io)
 #endif
   cout << left << setw(55) << filename << ": starting decoding ... " << endl;
+#endif
 
   FileReader reader(filename.c_str());
 
-  unique_ptr<Buffer> map = unique_ptr<Buffer>(reader.readFile());
+  auto map(reader.readFile());
   // Buffer* map = readFile( argv[1] );
 
   Timer t;
 
   RawParser parser(map.get());
-  unique_ptr<RawDecoder> decoder =
-      unique_ptr<RawDecoder>(parser.getDecoder(metadata));
+  auto decoder(parser.getDecoder(metadata));
   // RawDecoder* decoder = parseRaw( map );
 
   decoder->failOnUnknown = false;
@@ -332,12 +367,14 @@ size_t process(const string& filename, const CameraMetaData* metadata,
   // RawImage raw = decoder->decode();
 
   auto time = t();
+#if !defined(__has_feature) || !__has_feature(thread_sanitizer)
 #ifdef _OPENMP
 #pragma omp critical(io)
 #endif
   cout << left << setw(55) << filename << ": " << internal << setw(3)
        << map->getSize() / 1000000 << " MB / " << setw(4) << time << " ms"
        << endl;
+#endif
 
   if (create) {
     ofstream f(hashfile);
@@ -376,7 +413,8 @@ static int results(const map<string, string>& failedTests) {
     const string oldhash(i.first + ".hash");
     const string newhash(oldhash + ".failed");
 
-    ifstream oldfile(oldhash), newfile(newhash);
+    ifstream oldfile(oldhash);
+    ifstream newfile(newhash);
 
     // if neither hashes exist, nothing to append...
     if (!(oldfile.good() || newfile.good()))
@@ -454,7 +492,7 @@ int main(int argc, char **argv) {
   size_t time = 0;
   map<string, string> failedTests;
 #ifdef _OPENMP
-#pragma omp parallel for default(shared) schedule(static, 1) reduction(+ : time)
+#pragma omp parallel for default(shared) schedule(dynamic, 1) reduction(+ : time)
 #endif
   for (int i = 1; i < argc; ++i) {
     if (!argv[i])
@@ -468,7 +506,9 @@ int main(int argc, char **argv) {
 #endif
       {
         string msg = string(argv[i]) + " failed: " + e.what();
+#if !defined(__has_feature) || !__has_feature(thread_sanitizer)
         cerr << msg << endl;
+#endif
         failedTests.emplace(argv[i], msg);
       }
     }

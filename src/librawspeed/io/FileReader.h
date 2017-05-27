@@ -20,21 +20,20 @@
 
 #pragma once
 
+#include <memory> // for unique_ptr
+
 namespace rawspeed {
 
 class Buffer;
 
 class FileReader
 {
+  const char* fileName;
+
 public:
-  explicit FileReader(const char* filename);
+  explicit FileReader(const char* fileName_) : fileName(fileName_) {}
 
-  Buffer* readFile();
-  const char* Filename() const { return mFilename; }
-  //  void Filename(const char * val) { mFilename = val; }
-
-private:
-  const char* mFilename;
+  std::unique_ptr<Buffer> readFile();
 };
 
 } // namespace rawspeed

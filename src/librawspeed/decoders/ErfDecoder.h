@@ -22,7 +22,7 @@
 #pragma once
 
 #include "common/RawImage.h"              // for RawImage
-#include "decoders/AbstractTiffDecoder.h" // for AbstractTiffDecoder
+#include "decoders/SimpleTiffDecoder.h"   // for SimpleTiffDecoder
 #include "tiff/TiffIFD.h"                 // for TiffRootIFDOwner
 #include <algorithm>                      // for move
 
@@ -32,13 +32,12 @@ class Buffer;
 
 class CameraMetaData;
 
-class ErfDecoder final : public AbstractTiffDecoder
-{
+class ErfDecoder final : public SimpleTiffDecoder {
 public:
-  // please revert _this_ commit, once IWYU can handle inheriting constructors
-  // using AbstractTiffDecoder::AbstractTiffDecoder;
-  ErfDecoder(TiffRootIFDOwner&& root, Buffer* file)
-      : AbstractTiffDecoder(move(root), file) {}
+  static bool isAppropriateDecoder(const TiffRootIFD* rootIFD,
+                                   const Buffer* file);
+  ErfDecoder(TiffRootIFDOwner&& root, const Buffer* file)
+      : SimpleTiffDecoder(move(root), file) {}
 
   RawImage decodeRawInternal() override;
   void decodeMetaDataInternal(const CameraMetaData* meta) override;

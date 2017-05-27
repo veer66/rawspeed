@@ -35,7 +35,9 @@ class Buffer;
 class DngDecoder final : public AbstractTiffDecoder
 {
 public:
-  DngDecoder(TiffRootIFDOwner&& rootIFD, Buffer* file);
+  static bool isAppropriateDecoder(const TiffRootIFD* rootIFD,
+                                   const Buffer* file);
+  DngDecoder(TiffRootIFDOwner&& rootIFD, const Buffer* file);
 
   RawImage decodeRawInternal() override;
   void decodeMetaDataInternal(const CameraMetaData* meta) override;
@@ -44,7 +46,7 @@ public:
 protected:
   int getDecoderVersion() const override { return 0; }
   bool mFixLjpeg;
-  void dropUnsuportedChunks(std::vector<const TiffIFD*>& data);
+  void dropUnsuportedChunks(std::vector<const TiffIFD*>* data);
   void parseCFA(const TiffIFD* raw);
   void decodeData(const TiffIFD* raw, int compression, uint32 sample_format);
   void printMetaData();

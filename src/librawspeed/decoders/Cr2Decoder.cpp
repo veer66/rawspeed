@@ -39,14 +39,26 @@
 #include <array>                         // for array
 #include <cassert>                       // for assert
 #include <memory>                        // for unique_ptr, allocator
-#include <string>                        // for string
+#include <string>                        // for string, operator==
 #include <vector>                        // for vector
 // IWYU pragma: no_include <ext/alloc_traits.h>
+#include "common/TableLookUp.h" // for TableLookUp
 
 using std::string;
 using std::vector;
 
 namespace rawspeed {
+
+bool Cr2Decoder::isAppropriateDecoder(const TiffRootIFD* rootIFD,
+                                      const Buffer* file) {
+  const auto id = rootIFD->getID();
+  const std::string& make = id.make;
+  const std::string& model = id.model;
+
+  // FIXME: magic
+
+  return make == "Canon" || (make == "Kodak" && model == "DCS560C");
+}
 
 RawImage Cr2Decoder::decodeOldFormat() {
   uint32 offset = 0;
@@ -83,18 +95,18 @@ RawImage Cr2Decoder::decodeOldFormat() {
   }
 
   // deal with D2000 GrayResponseCurve
-  TiffEntry* curve = mRootIFD->getEntryRecursive((TiffTag)0x123);
+  TiffEntry* curve = mRootIFD->getEntryRecursive(static_cast<TiffTag>(0x123));
   if (curve && curve->type == TIFF_SHORT && curve->count == 4096) {
     auto table = curve->getU16Array(curve->count);
     if (!uncorrectedRawValues) {
-      mRaw->setTable(table.data(), table.size(), true);
+      mRaw->setTable(table, true);
       // Apply table
       mRaw->sixteenBitLookup();
       // Delete table
       mRaw->setTable(nullptr);
     } else {
       // We want uncorrected, but we store the table.
-      mRaw->setTable(table.data(), table.size(), false);
+      mRaw->setTable(table, false);
     }
   }
 
@@ -198,9 +210,9 @@ void Cr2Decoder::decodeMetaDataInternal(const CameraMetaData* meta) {
       int offset = hints.get("wb_offset", 126);
 
       offset /= 2;
-      mRaw->metadata.wbCoeffs[0] = (float) wb->getU16(offset + 0);
-      mRaw->metadata.wbCoeffs[1] = (float) wb->getU16(offset + 1);
-      mRaw->metadata.wbCoeffs[2] = (float) wb->getU16(offset + 3);
+      mRaw->metadata.wbCoeffs[0] = static_cast<float>(wb->getU16(offset + 0));
+      mRaw->metadata.wbCoeffs[1] = static_cast<float>(wb->getU16(offset + 1));
+      mRaw->metadata.wbCoeffs[2] = static_cast<float>(wb->getU16(offset + 3));
     } else {
       if (mRootIFD->hasEntryRecursive(CANONSHOTINFO) &&
           mRootIFD->hasEntryRecursive(CANONPOWERSHOTG9WB)) {
@@ -211,12 +223,17 @@ void Cr2Decoder::decodeMetaDataInternal(const CameraMetaData* meta) {
         int wb_offset = (wb_index < 18) ? "012347800000005896"[wb_index]-'0' : 0;
         wb_offset = wb_offset*8 + 2;
 
-        mRaw->metadata.wbCoeffs[0] = (float) g9_wb->getU32(wb_offset+1);
-        mRaw->metadata.wbCoeffs[1] = ((float) g9_wb->getU32(wb_offset+0) + (float) g9_wb->getU32(wb_offset+3)) / 2.0f;
-        mRaw->metadata.wbCoeffs[2] = (float) g9_wb->getU32(wb_offset+2);
-      } else if (mRootIFD->hasEntryRecursive((TiffTag) 0xa4)) {
+        mRaw->metadata.wbCoeffs[0] =
+            static_cast<float>(g9_wb->getU32(wb_offset + 1));
+        mRaw->metadata.wbCoeffs[1] =
+            (static_cast<float>(g9_wb->getU32(wb_offset + 0)) +
+             static_cast<float>(g9_wb->getU32(wb_offset + 3))) /
+            2.0F;
+        mRaw->metadata.wbCoeffs[2] =
+            static_cast<float>(g9_wb->getU32(wb_offset + 2));
+      } else if (mRootIFD->hasEntryRecursive(static_cast<TiffTag>(0xa4))) {
         // WB for the old 1D and 1DS
-        TiffEntry *wb = mRootIFD->getEntryRecursive((TiffTag) 0xa4);
+        TiffEntry* wb = mRootIFD->getEntryRecursive(static_cast<TiffTag>(0xa4));
         if (wb->count >= 3) {
           mRaw->metadata.wbCoeffs[0] = wb->getFloat(0);
           mRaw->metadata.wbCoeffs[1] = wb->getFloat(1);
@@ -235,10 +252,11 @@ int Cr2Decoder::getHue() {
   if (hints.has("old_sraw_hue"))
     return (mRaw->metadata.subsampling.y * mRaw->metadata.subsampling.x);
 
-  if (!mRootIFD->hasEntryRecursive((TiffTag)0x10)) {
+  if (!mRootIFD->hasEntryRecursive(static_cast<TiffTag>(0x10))) {
     return 0;
   }
-  uint32 model_id = mRootIFD->getEntryRecursive((TiffTag)0x10)->getU32();
+  uint32 model_id =
+      mRootIFD->getEntryRecursive(static_cast<TiffTag>(0x10))->getU32();
   if (model_id >= 0x80000281 || model_id == 0x80000218 || (hints.has("force_new_sraw_hue")))
     return ((mRaw->metadata.subsampling.y * mRaw->metadata.subsampling.x) - 1) >> 1;
 
@@ -263,8 +281,10 @@ void Cr2Decoder::sRawInterpolate() {
   sraw_coeffs[2] = wb->getU16(offset + 3);
 
   if (hints.has("invert_sraw_wb")) {
-    sraw_coeffs[0] = (int)(1024.0f / ((float)sraw_coeffs[0] / 1024.0f));
-    sraw_coeffs[2] = (int)(1024.0f / ((float)sraw_coeffs[2] / 1024.0f));
+    sraw_coeffs[0] = static_cast<int>(
+        1024.0F / (static_cast<float>(sraw_coeffs[0]) / 1024.0F));
+    sraw_coeffs[2] = static_cast<int>(
+        1024.0F / (static_cast<float>(sraw_coeffs[2]) / 1024.0F));
   }
 
   /* Determine sRaw coefficients */

@@ -29,6 +29,7 @@
 #include "io/Buffer.h"                              // for Buffer
 #include "io/ByteStream.h"                          // for ByteStream
 #include "io/Endianness.h"                          // for getU32LE, getLE
+#include "parsers/TiffParserException.h"            // for TiffParserException
 #include "tiff/TiffEntry.h"                         // for TiffEntry
 #include "tiff/TiffIFD.h"                           // for TiffRootIFD, Tif...
 #include "tiff/TiffTag.h"                           // for TiffTag::TILEOFF...
@@ -45,7 +46,28 @@ namespace rawspeed {
 
 class CameraMetaData;
 
-MosDecoder::MosDecoder(TiffRootIFDOwner&& rootIFD, Buffer* file)
+bool MosDecoder::isAppropriateDecoder(const TiffRootIFD* rootIFD,
+                                      const Buffer* file) {
+  try {
+    const auto id = rootIFD->getID();
+    const std::string& make = id.make;
+
+    // FIXME: magic
+
+    return make == "Leaf" || make == "Phase One A/S";
+  } catch (const TiffParserException&) {
+    // Last ditch effort to identify Leaf cameras that don't have a Tiff Make
+    // set
+    TiffEntry* softwareIFD = rootIFD->getEntryRecursive(SOFTWARE);
+    if (!softwareIFD)
+      return false;
+
+    const string software = trimSpaces(softwareIFD->getString());
+    return software == "Camera Library";
+  }
+}
+
+MosDecoder::MosDecoder(TiffRootIFDOwner&& rootIFD, const Buffer* file)
     : AbstractTiffDecoder(move(rootIFD), file) {
   black_level = 0;
 
@@ -88,7 +110,11 @@ RawImage MosDecoder::decodeRawInternal() {
     uint32 entries = getU32LE(insideTiff + offset);
     uint32 pos = 8; // Skip another 4 bytes
 
-    uint32 width=0, height=0, strip_offset=0, data_offset=0, wb_offset=0;
+    uint32 width = 0;
+    uint32 height = 0;
+    uint32 strip_offset = 0;
+    uint32 data_offset = 0;
+    uint32 wb_offset = 0;
     for (; entries > 0; entries--) {
       if (offset+base+pos+16 > mFile->getSize())
         ThrowRDE("offset out of bounds");
@@ -98,14 +124,27 @@ RawImage MosDecoder::decodeRawInternal() {
       // uint32 len  = getU32LE(insideTiff + offset + pos + 8);
       uint32 data = getU32LE(insideTiff + offset + pos + 12);
       pos += 16;
-      switch(tag) {
-      case 0x107: wb_offset    = data+base;      break;
-      case 0x108: width        = data;      break;
-      case 0x109: height       = data;      break;
-      case 0x10f: data_offset  = data+base; break;
-      case 0x21c: strip_offset = data+base; break;
-      case 0x21d: black_level  = data>>2;   break;
-      default: break;
+      switch (tag) {
+      case 0x107:
+        wb_offset = data + base;
+        break;
+      case 0x108:
+        width = data;
+        break;
+      case 0x109:
+        height = data;
+        break;
+      case 0x10f:
+        data_offset = data + base;
+        break;
+      case 0x21c:
+        strip_offset = data + base;
+        break;
+      case 0x21d:
+        black_level = data >> 2;
+        break;
+      default:
+        break;
       }
     }
     if (width <= 0 || height <= 0)
@@ -174,16 +213,20 @@ void MosDecoder::DecodePhaseOneC(uint32 data_offset, uint32 strip_offset, uint32
     int32 pred[2];
     uint32 len[2];
     pred[0] = pred[1] = 0;
-    auto *img = (ushort16 *)mRaw->getData(0, row);
+    auto* img = reinterpret_cast<ushort16*>(mRaw->getData(0, row));
     for (uint32 col=0; col < width; col++) {
       if (col >= (width & -8))
         len[0] = len[1] = 14;
       else if ((col & 7) == 0) {
         for (unsigned int &i : len) {
           int32 j = 0;
-          for (; j < 5 && !pump.getBits(1); j++);
-          if (j--)
-            i = length[j * 2 + pump.getBits(1)];
+
+          for (; j < 5; j++)
+            if (pump.getBits(1) != 0)
+              break;
+
+          if (j > 0)
+            i = length[2 * (j - 1) + pump.getBits(1)];
         }
       }
 
@@ -192,7 +235,7 @@ void MosDecoder::DecodePhaseOneC(uint32 data_offset, uint32 strip_offset, uint32
         img[col] = pred[col & 1] = pump.getBits(16);
       else
         img[col] = pred[col & 1] +=
-            (signed)pump.getBits(i) + 1 - (1 << (i - 1));
+            static_cast<signed>(pump.getBits(i)) + 1 - (1 << (i - 1));
     }
   }
 }
@@ -224,9 +267,9 @@ void MosDecoder::decodeMetaDataInternal(const CameraMetaData* meta) {
         iss >> tmp[0] >> tmp[1] >> tmp[2] >> tmp[3];
         if (!iss.fail() && tmp[0] > 0 && tmp[1] > 0 && tmp[2] > 0 &&
             tmp[3] > 0) {
-          mRaw->metadata.wbCoeffs[0] = (float) tmp[0]/tmp[1];
-          mRaw->metadata.wbCoeffs[1] = (float) tmp[0]/tmp[2];
-          mRaw->metadata.wbCoeffs[2] = (float) tmp[0]/tmp[3];
+          mRaw->metadata.wbCoeffs[0] = static_cast<float>(tmp[0]) / tmp[1];
+          mRaw->metadata.wbCoeffs[1] = static_cast<float>(tmp[0]) / tmp[2];
+          mRaw->metadata.wbCoeffs[2] = static_cast<float>(tmp[0]) / tmp[3];
         }
         break;
       }

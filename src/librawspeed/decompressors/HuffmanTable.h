@@ -2,6 +2,7 @@
     RawSpeed - RAW file decoder.
 
     Copyright (C) 2017 Axel Waggershauser
+    Copyright (C) 2017 Roman Lebedev
 
     This library is free software; you can redistribute it and/or
     modify it under the terms of the GNU Lesser General Public
@@ -64,8 +65,7 @@
 
 namespace rawspeed {
 
-class HuffmanTable
-{
+class HuffmanTable final {
   // private fields calculated from codesPerBits and codeValues
   // they are index '1' based, so we can directly lookup the value
   // for code length l without decrementing
@@ -97,24 +97,30 @@ class HuffmanTable
   std::vector<uchar8> decodeLookup;
 #endif
 
+  bool fullDecode = true;
   bool fixDNGBug16 = false;
 
-  size_t maxCodePlusDiffLength() const {
-    return nCodesPerLength.size()-1 + codeValues.size()-1;
+  inline size_t __attribute__((pure)) maxCodePlusDiffLength() const {
+    return nCodesPerLength.size() - 1 +
+           *(std::max_element(codeValues.cbegin(), codeValues.cend()));
   }
 
-public:
-
   // These two fields directly represent the contents of a JPEG DHT field
+
   // 1. The number of codes there are per bit length, this is index 1 based.
   // (there are always 0 codes of length 0)
-  std::vector<int> nCodesPerLength; // index is length of code
+  std::vector<unsigned int> nCodesPerLength; // index is length of code
+  inline unsigned int __attribute__((pure)) maxCodesCount() const {
+    return std::accumulate(nCodesPerLength.begin(), nCodesPerLength.end(), 0U);
+  }
+
   // 2. This is the actual huffman encoded data, i.e. the 'alphabet'. Each value
   // is the number of bits following the code that encode the difference to the
   // last pixel. Valid values are in the range 0..16.
   // signExtended() is used to decode the difference bits to a signed int.
   std::vector<uchar8> codeValues;   // index is just sequential number
 
+public:
   bool operator==(const HuffmanTable& other) const {
     return nCodesPerLength == other.nCodesPerLength
         && codeValues      == other.codeValues;
@@ -122,26 +128,57 @@ public:
 
   uint32 setNCodesPerLength(const Buffer& data) {
     assert(data.getSize() == 16);
-    nCodesPerLength.resize(17);
+
+    nCodesPerLength.resize(17, 0);
     std::copy(data.begin(), data.end(), &nCodesPerLength[1]);
+    assert(nCodesPerLength[0] == 0);
+
     // trim empty entries from the codes per length table on the right
-    while (nCodesPerLength.back() == 0)
+    while (!nCodesPerLength.empty() && nCodesPerLength.back() == 0)
       nCodesPerLength.pop_back();
-    return std::accumulate(data.begin(), data.end(), 0);
+
+    if (nCodesPerLength.empty())
+      ThrowRDE("Codes-per-length table is empty");
+
+    assert(nCodesPerLength.back() > 0);
+
+    const auto count = maxCodesCount();
+    assert(count > 0);
+
+    if (count > 162)
+      ThrowRDE("Too big code-values table");
+
+    for (auto codeLen = 1U; codeLen < nCodesPerLength.size(); codeLen++) {
+      // we have codeLen bits. make sure that that code count can actually fit
+      const auto nCodes = nCodesPerLength[codeLen];
+      if (nCodes > ((1U << codeLen) - 1U)) {
+        ThrowRDE("Corrupt Huffman. Can not have %u codes in %u-bit len", nCodes,
+                 codeLen);
+      }
+    }
+
+    return count;
   }
 
   void setCodeValues(const Buffer& data) {
     // spec says max 16 but Hasselblad ignores that -> allow 17
     // Canon's old CRW really ignores this ...
     assert(data.getSize() <= 162);
+    assert(data.getSize() == maxCodesCount());
+
     codeValues.clear();
-    const size_t maxCount = std::distance(data.begin(), data.end());
-    codeValues.reserve(maxCount);
+    codeValues.reserve(maxCodesCount());
     std::copy(data.begin(), data.end(), std::back_inserter(codeValues));
-    assert(codeValues.size() == maxCount);
+    assert(codeValues.size() == maxCodesCount());
+
+    for (const auto cValue : codeValues) {
+      if (cValue > 16)
+        ThrowRDE("Corrupt Huffman. Code value %u is bigger than 16", cValue);
+    }
   }
 
-  void setup(bool fullDecode, bool fixDNGBug16_) {
+  void setup(bool fullDecode_, bool fixDNGBug16_) {
+    this->fullDecode = fullDecode_;
     this->fixDNGBug16 = fixDNGBug16_;
 
     // store the code lengths in bits, valid values are 0..16
@@ -149,41 +186,46 @@ public:
     // store the codes themselfs (bit patterns found inside the stream)
     std::vector<ushort16> codes;  // index is just sequential number
 
-    int maxCodeLength = nCodesPerLength.size()-1;
+    assert(!nCodesPerLength.empty());
+    assert(maxCodesCount() > 0);
 
-    // precompute how much code entries there are
-    size_t maxCodesCount = 0;
-    for (int l = 1; l <= maxCodeLength; ++l) {
-      for (int i = 0; i < nCodesPerLength[l]; ++i) {
-        maxCodesCount++;
-      }
-    }
+    unsigned int maxCodeLength = nCodesPerLength.size() - 1U;
+    assert(codeValues.size() == maxCodesCount());
+
+    assert(maxCodePlusDiffLength() <= 32U);
 
     // reserve all the memory. avoids lots of small allocs
-    code_len.reserve(maxCodesCount);
-    codes.reserve(maxCodesCount);
+    code_len.reserve(maxCodesCount());
+    codes.reserve(maxCodesCount());
 
     // Figure C.1: make table of Huffman code length for each symbol
     // Figure C.2: generate the codes themselves
     uint32 code = 0;
-    for (int l = 1; l <= maxCodeLength; ++l) {
-      assert(nCodesPerLength[l] < (1<<l));
-      for (int i = 0; i < nCodesPerLength[l]; ++i) {
-        assert(code <= 0xffff);
+    for (unsigned int l = 1; l <= maxCodeLength; ++l) {
+      assert(nCodesPerLength[l] <= ((1U << l) - 1U));
+
+      for (unsigned int i = 0; i < nCodesPerLength[l]; ++i) {
+        if (code > 0xffff) {
+          ThrowRDE("Corrupt Huffman: code value overflow on len = %u, %u-th "
+                   "code out of %u\n",
+                   l, i, nCodesPerLength[l]);
+        }
+
         code_len.push_back(l);
-        codes.push_back(code++);
+        codes.push_back(code);
+        code++;
       }
       code <<= 1;
     }
 
-    assert(code_len.size() == maxCodesCount);
-    assert(codes.size() == maxCodesCount);
+    assert(code_len.size() == maxCodesCount());
+    assert(codes.size() == maxCodesCount());
 
     // Figure F.15: generate decoding tables
     codeOffsetOL.resize(maxCodeLength + 1UL, 0xffff);
     maxCodeOL.resize(maxCodeLength + 1UL);
     int code_index = 0;
-    for (int l = 1; l <= maxCodeLength; l++) {
+    for (unsigned int l = 1U; l <= maxCodeLength; l++) {
       if (nCodesPerLength[l]) {
         codeOffsetOL[l] = codes[code_index] - code_index;
         code_index += nCodesPerLength[l];
@@ -196,13 +238,16 @@ public:
     decodeLookup.resize(1 << LookupDepth);
     for (size_t i = 0; i < codes.size(); i++) {
       uchar8 code_l = code_len[i];
-      if (code_l > (int)LookupDepth)
+      if (code_l > static_cast<int>(LookupDepth))
         break;
 
       ushort16 ll = codes[i] << (LookupDepth - code_l);
       ushort16 ul = ll | ((1 << (LookupDepth - code_l)) - 1);
       ushort16 diff_l = codeValues[i];
       for (ushort16 c = ll; c <= ul; c++) {
+        if (!(c < decodeLookup.size()))
+          ThrowRDE("Corrupt Huffman");
+
         if (!FlagMask || !fullDecode || diff_l + code_l > LookupDepth) {
           // lookup bit depth is too small to fit both the encoded length
           // and the final difference value.
@@ -215,7 +260,8 @@ public:
 
           if (diff_l) {
             uint32 diff = (c >> (LookupDepth - code_l - diff_l)) & ((1 << diff_l) - 1);
-            decodeLookup[c] |= (uint32)signExtended(diff, diff_l) << PayloadShift;
+            decodeLookup[c] |= static_cast<uint32>(signExtended(diff, diff_l))
+                               << PayloadShift;
           }
         }
       }
@@ -242,10 +288,12 @@ public:
   }
 
   template<typename BIT_STREAM> inline int decodeLength(BIT_STREAM& bs) const {
+    assert(!fullDecode);
     return decode<BIT_STREAM, false>(bs);
   }
 
   template<typename BIT_STREAM> inline int decodeNext(BIT_STREAM& bs) const {
+    assert(fullDecode);
     return decode<BIT_STREAM, true>(bs);
   }
 
@@ -254,14 +302,22 @@ public:
   // one to return the fully decoded diff.
   // All ifs depending on this bool will be optimized out by the compiler
   template<typename BIT_STREAM, bool FULL_DECODE> inline int decode(BIT_STREAM& bs) const {
+    assert(FULL_DECODE == fullDecode);
+
     // 32 is the absolute maximum combined length of code + diff
+    // assertion  maxCodePlusDiffLength() <= 32U  is already checked in setup()
+    bs.fill(32);
+
     // for processors supporting bmi2 instructions, using maxCodePlusDiffLength()
     // might be benifitial
-    bs.fill(32);
-    uint32 code = bs.peekBitsNoFill(LookupDepth);
 
+    uint32 code = bs.peekBitsNoFill(LookupDepth);
+    assert(code < decodeLookup.size());
     int val = decodeLookup[code];
     int len = val & LenMask;
+    assert(len >= 0);
+    assert(len <= 16);
+
     // if the code is invalid (bitstream corrupted) len will be 0
     bs.skipBitsNoFill(len);
     if (FULL_DECODE && val & FlagMask) {
@@ -271,7 +327,8 @@ public:
 
     if (len) {
       // if the flag bit is not set but len != 0, the payload is the number of bits to sign extend and return
-      int l_diff = val >> PayloadShift;
+      const int l_diff = val >> PayloadShift;
+      assert((FULL_DECODE && (len + l_diff <= 32)) || !FULL_DECODE);
       return FULL_DECODE ? signExtended(bs.getBitsNoFill(l_diff), l_diff) : l_diff;
     }
 
@@ -286,6 +343,9 @@ public:
     if (code_l >= maxCodeOL.size() || code > maxCodeOL[code_l])
       ThrowRDE("bad Huffman code: %u (len: %u)", code, code_l);
 
+    if (code < codeOffsetOL[code_l])
+      ThrowRDE("likely corrupt Huffman code: %u (len: %u)", code, code_l);
+
     int diff_l = codeValues[code - codeOffsetOL[code_l]];
 
     if (!FULL_DECODE)
@@ -297,6 +357,8 @@ public:
       return -32768;
     }
 
+    assert(FULL_DECODE);
+    assert((diff_l && (len + code_l + diff_l <= 32)) || !diff_l);
     return diff_l ? signExtended(bs.getBitsNoFill(diff_l), diff_l) : 0;
   }
 };

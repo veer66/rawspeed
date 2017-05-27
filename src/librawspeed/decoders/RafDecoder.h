@@ -33,10 +33,12 @@ class Buffer;
 
 class RafDecoder final : public AbstractTiffDecoder
 {
+  bool alt_layout = false;
+
 public:
-  // please revert _this_ commit, once IWYU can handle inheriting constructors
-  // using AbstractTiffDecoder::AbstractTiffDecoder;
-  RafDecoder(TiffRootIFDOwner&& root, Buffer* file)
+  static bool isAppropriateDecoder(const TiffRootIFD* rootIFD,
+                                   const Buffer* file);
+  RafDecoder(TiffRootIFDOwner&& root, const Buffer* file)
       : AbstractTiffDecoder(move(root), file) {}
 
   RawImage decodeRawInternal() override;
@@ -47,7 +49,6 @@ public:
 protected:
   int getDecoderVersion() const override { return 1; }
   void DecodeRaf();
-  bool alt_layout = false;
 };
 
 } // namespace rawspeed

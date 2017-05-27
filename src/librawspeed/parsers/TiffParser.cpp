@@ -4,6 +4,7 @@
     Copyright (C) 2009-2014 Klaus Post
     Copyright (C) 2014 Pedro Côrte-Real
     Copyright (C) 2017 Axel Waggershauser
+    Copyright (C) 2017 Roman Lebedev
 
     This library is free software; you can redistribute it and/or
     modify it under the terms of the GNU Lesser General Public
@@ -22,7 +23,6 @@
 
 #include "parsers/TiffParser.h"
 #include "common/Common.h"               // for make_unique, trimSpaces
-#include "common/RawspeedException.h"    // for RawspeedException
 #include "decoders/ArwDecoder.h"         // for ArwDecoder
 #include "decoders/Cr2Decoder.h"         // for Cr2Decoder
 #include "decoders/DcrDecoder.h"         // for DcrDecoder
@@ -36,25 +36,24 @@
 #include "decoders/OrfDecoder.h"         // for OrfDecoder
 #include "decoders/PefDecoder.h"         // for PefDecoder
 #include "decoders/RafDecoder.h"         // for RafDecoder
+#include "decoders/RawDecoder.h"         // for RawDecoder
 #include "decoders/Rw2Decoder.h"         // for Rw2Decoder
 #include "decoders/SrwDecoder.h"         // for SrwDecoder
 #include "decoders/ThreefrDecoder.h"     // for ThreefrDecoder
 #include "io/ByteStream.h"               // for ByteStream
 #include "parsers/TiffParserException.h" // for TiffParserException
-#include "tiff/TiffEntry.h"              // for TiffEntry
-#include "tiff/TiffTag.h"                // for TiffTag::DNGVERSION, TiffTa...
-#include <algorithm>                     // for move
+#include "tiff/TiffEntry.h"              // IWYU pragma: keep
+#include <cassert>                       // for assert
 #include <cstdint>                       // for UINT32_MAX
 #include <memory>                        // for unique_ptr
 #include <string>                        // for operator==, basic_string
+#include <tuple>                         // for tie, tuple
 #include <vector>                        // for vector
 // IWYU pragma: no_include <ext/alloc_traits.h>
 
 using std::string;
 
 namespace rawspeed {
-
-class RawDecoder;
 
 TiffRootIFDOwner TiffParser::parse(const Buffer& data) {
   ByteStream bs(data, 0);
@@ -75,88 +74,50 @@ TiffRootIFDOwner TiffParser::parse(const Buffer& data) {
   return root;
 }
 
-RawDecoder* TiffParser::makeDecoder(TiffRootIFDOwner root, Buffer& data) {
-  Buffer* mInput = &data;
+std::unique_ptr<RawDecoder> TiffParser::makeDecoder(TiffRootIFDOwner root,
+                                                    const Buffer& data) {
+  const Buffer* mInput = &data;
   if (!root)
     ThrowTPE("TiffIFD is null.");
 
-  if (root->hasEntryRecursive(DNGVERSION)) {  // We have a dng image entry
-    try {
-      return new DngDecoder(move(root), mInput);
-    } catch (RawspeedException& e) {
-      //TODO: remove this exception type conversion
-      ThrowTPE("%s", e.what());
-    }
-  }
+  for (const auto& decoder : Map) {
+    checker_t dChecker = nullptr;
+    constructor_t dConstructor = nullptr;
 
-  try {
-    auto id = root->getID();
-    string make = id.make;
-    string model = id.model;
+    std::tie(dChecker, dConstructor) = decoder;
 
-    if (make == "Canon") {
-      return new Cr2Decoder(move(root), mInput);
-    }
-    if (make == "FUJIFILM") {
-      return new RafDecoder(move(root), mInput);
-    }
-    if (make == "NIKON CORPORATION" || make == "NIKON") {
-      return new NefDecoder(move(root), mInput);
-    }
-    if (make == "OLYMPUS IMAGING CORP." || make == "OLYMPUS CORPORATION" ||
-        make == "OLYMPUS OPTICAL CO.,LTD") {
-      return new OrfDecoder(move(root), mInput);
-    }
-    if (make == "SONY") {
-      return new ArwDecoder(move(root), mInput);
-    }
-    if (make == "PENTAX Corporation" || make == "RICOH IMAGING COMPANY, LTD." ||
-        make == "PENTAX") {
-      return new PefDecoder(move(root), mInput);
-    }
-    if (make == "Panasonic" || make == "LEICA") {
-      return new Rw2Decoder(move(root), mInput);
-    }
-    if (make == "SAMSUNG") {
-      return new SrwDecoder(move(root), mInput);
-    }
-    if (make == "Mamiya-OP Co.,Ltd.") {
-      return new MefDecoder(move(root), mInput);
-    }
-    if (make == "Kodak") {
-      if (model == "DCS560C")
-        return new Cr2Decoder(move(root), mInput);
+    assert(dChecker);
+    assert(dConstructor);
 
-      return new DcrDecoder(move(root), mInput);
-    }
-    if (make == "KODAK") {
-      return new DcsDecoder(move(root), mInput);
-    }
-    if (make == "EASTMAN KODAK COMPANY") {
-      return new KdcDecoder(move(root), mInput);
-    }
-    if (make == "SEIKO EPSON CORP.") {
-      return new ErfDecoder(move(root), mInput);
-    }
-    if (make == "Hasselblad") {
-      return new ThreefrDecoder(move(root), mInput);
-    }
-    if (make == "Leaf" || make == "Phase One A/S") {
-      return new MosDecoder(move(root), mInput);
-    }
-  } catch (const TiffParserException&) {
-    // Last ditch effort to identify Leaf cameras that don't have a Tiff Make set
-    TiffEntry* softwareIFD = root->getEntryRecursive(SOFTWARE);
-    if (softwareIFD) {
-      string software = trimSpaces(softwareIFD->getString());
-      if (software == "Camera Library") {
-        return new MosDecoder(move(root), mInput);
-      }
-    }
+    if (!dChecker(root.get(), mInput))
+      continue;
+
+    return dConstructor(move(root), mInput);
   }
 
   ThrowTPE("No decoder found. Sorry.");
   return nullptr;
 }
+
+template <class Decoder>
+std::unique_ptr<RawDecoder> TiffParser::constructor(TiffRootIFDOwner&& root,
+                                                    const Buffer* data) {
+  return make_unique<Decoder>(std::move(root), data);
+}
+
+#define DECODER(name)                                                          \
+  { std::make_pair(&name::isAppropriateDecoder, &constructor<name>) }
+
+const std::array<std::pair<TiffParser::checker_t, TiffParser::constructor_t>,
+                 16>
+    TiffParser::Map = {{
+        DECODER(DngDecoder), DECODER(MosDecoder), DECODER(Cr2Decoder),
+        DECODER(RafDecoder), DECODER(NefDecoder), DECODER(OrfDecoder),
+        DECODER(ArwDecoder), DECODER(PefDecoder), DECODER(Rw2Decoder),
+        DECODER(SrwDecoder), DECODER(MefDecoder), DECODER(DcrDecoder),
+        DECODER(DcsDecoder), DECODER(KdcDecoder), DECODER(ErfDecoder),
+        DECODER(ThreefrDecoder),
+
+    }};
 
 } // namespace rawspeed

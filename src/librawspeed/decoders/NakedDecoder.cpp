@@ -41,10 +41,10 @@ NakedDecoder::NakedDecoder(Buffer* file, const Camera* c)
     : RawDecoder(file), cam(c) {}
 
 const map<string, BitOrder> NakedDecoder::order2enum = {
-    {"plain", BitOrder_Plain},
-    {"jpeg", BitOrder_Jpeg},
-    {"jpeg16", BitOrder_Jpeg16},
-    {"jpeg32", BitOrder_Jpeg32},
+    {"plain", BitOrder_LSB},
+    {"jpeg", BitOrder_MSB},
+    {"jpeg16", BitOrder_MSB16},
+    {"jpeg32", BitOrder_MSB32},
 };
 
 void NakedDecoder::parseHints() {
@@ -52,11 +52,11 @@ void NakedDecoder::parseHints() {
   const auto& make = cam->make.c_str();
   const auto& model = cam->model.c_str();
 
-  auto parseHint = [&cHints, &make, &model](const string& name) -> uint32 {
+  auto parseHint = [&cHints, &make, &model](const string& name) {
     if (!cHints.has(name))
       ThrowRDE("%s %s: couldn't find %s", make, model, name.c_str());
 
-    return cHints.get(name, 0u);
+    return cHints.get(name, 0U);
   };
 
   width = parseHint("full_width");

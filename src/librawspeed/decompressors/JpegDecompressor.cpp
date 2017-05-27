@@ -24,6 +24,7 @@
 #ifdef HAVE_JPEG
 
 #include "decompressors/JpegDecompressor.h"
+
 #include "common/Common.h"                // for uchar8, uint32, ushort16
 #include "common/Memory.h"                // for alignedFree, alignedMalloc...
 #include "common/Point.h"                 // for iPoint2D
@@ -31,18 +32,15 @@
 #include "io/ByteStream.h"                // for ByteStream
 #include <algorithm>                      // for min
 #include <cstdio>                         // for size_t
+#include <jpeglib.h>                      // for jpeg
 #include <memory>                         // for unique_ptr
 #include <vector>                         // for vector
+// IWYU pragma: no_include <jconfig.h>
+// IWYU pragma: no_include <jmorecfg.h>
 
 #ifndef HAVE_JPEG_MEM_SRC
 #include "io/IOException.h" // for ThrowIOE
 #endif
-
-extern "C" {
-#include <jpeglib.h> // for jpeg_source_mgr, jpeg_decompress_struct
-// IWYU pragma: no_include <jconfig.h>
-// IWYU pragma: no_include <jmorecfg.h>
-}
 
 using std::vector;
 using std::unique_ptr;
@@ -54,7 +52,8 @@ namespace rawspeed {
 
 // FIXME: some libjpeg versions discard const qual for the input data pointer
 // should this be a cmake check?
-#define JPEG_MEMSRC(A, B, C) jpeg_mem_src(A, const_cast<unsigned char*>(B), C)
+#define JPEG_MEMSRC(A, B, C)                                                   \
+  jpeg_mem_src(A, const_cast<unsigned char*>(B), C) // NOLINT
 
 #else
 
@@ -98,8 +97,7 @@ static void jpeg_mem_src_int(j_decompress_ptr cinfo,
 
 #endif
 
-METHODDEF(void)
-my_error_throw(j_common_ptr cinfo) {
+[[noreturn]] METHODDEF(void) my_error_throw(j_common_ptr cinfo) {
   char buf[JMSG_LENGTH_MAX] = {0};
   (*cinfo->err->format_message)(cinfo, buf);
   ThrowRDE("JPEG decoder error: %s", buf);
@@ -123,13 +121,14 @@ void JpegDecompressor::decode(uint32 offX,
   vector<JSAMPROW> buffer(1);
 
   const auto size = input.getRemainSize();
+
   JPEG_MEMSRC(&dinfo, input.getData(size), size);
 
   if (JPEG_HEADER_OK != jpeg_read_header(&dinfo, static_cast<boolean>(true)))
     ThrowRDE("Unable to read JPEG header");
 
   jpeg_start_decompress(&dinfo);
-  if (dinfo.output_components != (int)mRaw->getCpp())
+  if (dinfo.output_components != static_cast<int>(mRaw->getCpp()))
     ThrowRDE("Component count doesn't match");
   int row_stride = dinfo.output_width * dinfo.output_components;
 
@@ -137,8 +136,9 @@ void JpegDecompressor::decode(uint32 offX,
       alignedMallocArray<uchar8, 16>(dinfo.output_height, row_stride),
       &alignedFree);
   while (dinfo.output_scanline < dinfo.output_height) {
-    buffer[0] = (JSAMPROW)(
-        &complete_buffer[(size_t)dinfo.output_scanline * row_stride]);
+    buffer[0] = static_cast<JSAMPROW>(
+        &complete_buffer[static_cast<size_t>(dinfo.output_scanline) *
+                         row_stride]);
     if (0 == jpeg_read_scanlines(&dinfo, &buffer[0], 1))
       ThrowRDE("JPEG Error while decompressing image.");
   }
@@ -148,11 +148,14 @@ void JpegDecompressor::decode(uint32 offX,
   int copy_w = min(mRaw->dim.x - offX, dinfo.output_width);
   int copy_h = min(mRaw->dim.y - offY, dinfo.output_height);
   for (int y = 0; y < copy_h; y++) {
-    uchar8* src = &complete_buffer[(size_t)row_stride * y];
-    auto* dst = (ushort16*)mRaw->getData(offX, y + offY);
+    uchar8* src = &complete_buffer[static_cast<size_t>(row_stride) * y];
+    auto* dst = reinterpret_cast<ushort16*>(mRaw->getData(offX, y + offY));
     for (int x = 0; x < copy_w; x++) {
-      for (int c = 0; c < dinfo.output_components; c++)
-        *dst++ = (*src++);
+      for (int c = 0; c < dinfo.output_components; c++) {
+        *dst = *src;
+        src++;
+        dst++;
+      }
     }
   }
 }

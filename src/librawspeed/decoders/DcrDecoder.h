@@ -23,7 +23,7 @@
 
 #include "common/Common.h"                // for uint32, ushort16
 #include "common/RawImage.h"              // for RawImage
-#include "decoders/AbstractTiffDecoder.h" // for AbstractTiffDecoder
+#include "decoders/SimpleTiffDecoder.h"   // for SimpleTiffDecoder
 #include "tiff/TiffIFD.h"                 // for TiffRootIFDOwner
 #include <algorithm>                      // for move
 
@@ -35,21 +35,20 @@ class ByteStream;
 
 class CameraMetaData;
 
-class DcrDecoder final : public AbstractTiffDecoder
-{
+class DcrDecoder final : public SimpleTiffDecoder {
 public:
-  // please revert _this_ commit, once IWYU can handle inheriting constructors
-  // using AbstractTiffDecoder::AbstractTiffDecoder;
-  DcrDecoder(TiffRootIFDOwner&& root, Buffer* file)
-      : AbstractTiffDecoder(move(root), file) {}
+  static bool isAppropriateDecoder(const TiffRootIFD* rootIFD,
+                                   const Buffer* file);
+  DcrDecoder(TiffRootIFDOwner&& root, const Buffer* file)
+      : SimpleTiffDecoder(move(root), file) {}
 
   RawImage decodeRawInternal() override;
   void decodeMetaDataInternal(const CameraMetaData* meta) override;
 
 protected:
   int getDecoderVersion() const override { return 0; }
-  void decodeKodak65000(ByteStream &input, uint32 w, uint32 h);
-  void decodeKodak65000Segment(ByteStream &input, ushort16 *out, uint32 bsize);
+  void decodeKodak65000(ByteStream* input, uint32 w, uint32 h);
+  void decodeKodak65000Segment(ByteStream* input, ushort16* out, uint32 bsize);
 };
 
 } // namespace rawspeed

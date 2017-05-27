@@ -34,6 +34,10 @@
 namespace rawspeed {
 
 class JpegDecompressor final : public AbstractDecompressor {
+  struct JpegDecompressStruct;
+  ByteStream input;
+  RawImage mRaw;
+
 public:
   JpegDecompressor(const Buffer& data, Buffer::size_type offset,
                    Buffer::size_type size, const RawImage& img)
@@ -41,14 +45,8 @@ public:
   JpegDecompressor(const Buffer& data, Buffer::size_type offset,
                    const RawImage& img)
       : JpegDecompressor(data, offset, data.getSize() - offset, img) {}
-  virtual ~JpegDecompressor() = default;
 
   void decode(uint32 offsetX, uint32 offsetY);
-
-protected:
-  struct JpegDecompressStruct;
-  ByteStream input;
-  RawImage mRaw;
 };
 
 } // namespace rawspeed

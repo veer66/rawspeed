@@ -12,13 +12,16 @@ endif()
 
 find_package(GCov)
 
-set(GCOV_REPORT_PATH "${CMAKE_BINARY_DIR}/gcov-reports/")
-file(MAKE_DIRECTORY "${GCOV_REPORT_PATH}")
+set(GCOV_OPTS "-pb")
+
+if(NOT APPLE)
+  # DONT elide source prefix.
+  set(GCOV_OPTS ${GCOV_OPTS} -aflu)
+endif()
 
 add_custom_target(
   gcov
-  COMMAND find "${CMAKE_SOURCE_DIR}" -type f -name '*.gcov' -exec rm {} + > /dev/null
-  COMMAND find "${CMAKE_SOURCE_DIR}" -type f -name '*.gcno' -exec "${GCOV_PATH}" -abflpu  {} + > /dev/null
+  COMMAND find "${CMAKE_BINARY_DIR}" -type f -name '*.gcno' -exec "${GCOV_PATH}" ${GCOV_OPTS} {} + > /dev/null
   WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
   COMMENT "Running gcov tool on all the *.gcno files"
 )

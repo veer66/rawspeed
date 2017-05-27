@@ -20,38 +20,32 @@
 */
 
 #include "decoders/DcsDecoder.h"
-#include "common/Common.h"                          // for uint32
-#include "common/Point.h"                           // for iPoint2D
+#include "common/TableLookUp.h"                     // for TableLookUp
 #include "decoders/RawDecoderException.h"           // for RawDecoderExcept...
 #include "decompressors/UncompressedDecompressor.h" // for UncompressedDeco...
-#include "io/Buffer.h"                              // for Buffer
 #include "tiff/TiffEntry.h"                         // for TiffEntry, TiffD...
-#include "tiff/TiffIFD.h"                           // for TiffIFD, TiffRoo...
+#include "tiff/TiffIFD.h"                           // for TiffRootIFD
 #include "tiff/TiffTag.h"                           // for TiffTag::GRAYRES...
 #include <cassert>                                  // for assert
 #include <memory>                                   // for unique_ptr
-#include <vector>                                   // for vector
+#include <string>                                   // for operator==, string
 
 namespace rawspeed {
 
 class CameraMetaData;
 
+bool DcsDecoder::isAppropriateDecoder(const TiffRootIFD* rootIFD,
+                                      const Buffer* file) {
+  const auto id = rootIFD->getID();
+  const std::string& make = id.make;
+
+  // FIXME: magic
+
+  return make == "KODAK";
+}
+
 RawImage DcsDecoder::decodeRawInternal() {
-  auto raw = getIFDWithLargestImage();
-  uint32 width = raw->getEntry(IMAGEWIDTH)->getU32();
-  uint32 height = raw->getEntry(IMAGELENGTH)->getU32();
-  uint32 off = raw->getEntry(STRIPOFFSETS)->getU32();
-  uint32 c2 = raw->getEntry(STRIPBYTECOUNTS)->getU32();
-
-  if (off > mFile->getSize())
-    ThrowRDE("Offset is out of bounds");
-
-  if (c2 > mFile->getSize() - off) {
-    mRaw->setError("Warning: byte count larger than file size, file probably truncated.");
-  }
-
-  mRaw->dim = iPoint2D(width, height);
-  mRaw->createData();
+  SimpleTiffDecoder::prepareForRawDecoding();
 
   TiffEntry *linearization = mRootIFD->getEntryRecursive(GRAYRESPONSECURVE);
   if (!linearization || linearization->count != 256 || linearization->type != TIFF_SHORT)
@@ -61,7 +55,7 @@ RawImage DcsDecoder::decodeRawInternal() {
   auto table = linearization->getU16Array(256);
 
   if (!uncorrectedRawValues)
-    mRaw->setTable(table.data(), table.size(), true);
+    mRaw->setTable(table, true);
 
   UncompressedDecompressor u(*mFile, off, c2, mRaw);
 
@@ -71,11 +65,10 @@ RawImage DcsDecoder::decodeRawInternal() {
     u.decode8BitRaw<false>(width, height);
 
   // Set the table, if it should be needed later.
-  if (uncorrectedRawValues) {
-    mRaw->setTable(table.data(), table.size(), false);
-  } else {
+  if (uncorrectedRawValues)
+    mRaw->setTable(table, false);
+  else
     mRaw->setTable(nullptr);
-  }
 
   return mRaw;
 }

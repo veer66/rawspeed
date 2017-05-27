@@ -14,6 +14,7 @@ endif()
 target_link_libraries(rawspeed_test PUBLIC ${RAWSPEED_LIBS})
 target_compile_definitions(rawspeed_test PUBLIC "$<TARGET_PROPERTY:rawspeed,COMPILE_DEFINITIONS>")
 target_include_directories(rawspeed_test PUBLIC "$<TARGET_PROPERTY:rawspeed,INCLUDE_DIRECTORIES>")
+target_include_directories(rawspeed_test SYSTEM PUBLIC "$<TARGET_PROPERTY:rawspeed,INTERFACE_SYSTEM_INCLUDE_DIRECTORIES>")
 add_dependencies(rawspeed_test rawspeed)
 
 target_link_libraries(rawspeed_test PUBLIC gtest gmock_main)
@@ -36,9 +37,17 @@ FILE(GLOB RAWSPEED_TESTS_SOURCES
   "ExceptionsTest.cpp"
 )
 
-CHECK_CXX_COMPILER_FLAG_AND_ENABLE_IT(-Wno-suggest-attribute=const)
-CHECK_CXX_COMPILER_FLAG_AND_ENABLE_IT(-Wno-suggest-override)
-CHECK_CXX_COMPILER_FLAG_AND_ENABLE_IT(-Wno-missing-prototypes)
+set (DISABLED_WARNING_FLAGS
+  "missing-prototypes"
+  "missing-variable-declarations"
+  "suggest-attribute=const"
+  "suggest-override"
+  "used-but-marked-unused"
+)
+
+foreach(warning ${DISABLED_WARNING_FLAGS})
+  CHECK_CXX_COMPILER_FLAG_AND_ENABLE_IT(-Wno-${warning})
+endforeach()
 
 if(NOT SPECIAL_BUILD)
   # should be < 64Kb

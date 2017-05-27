@@ -53,11 +53,25 @@ void Cr2Decompressor::decodeScan()
     if (mRaw->getCpp() != frame.cps)
       ThrowRDE("Subsampled component count does not match image.");
 
-    if (frame.cps != 3 || frame.compInfo[0].superH != 2 ||
-        (frame.compInfo[0].superV != 2 && frame.compInfo[0].superV != 1) ||
-        frame.compInfo[1].superH != 1 || frame.compInfo[1].superV != 1 ||
-        frame.compInfo[2].superH != 1 || frame.compInfo[2].superV != 1)
-      ThrowRDE("Unsupported subsampling");
+    if (frame.cps != 3)
+      ThrowRDE("Unsupported number of subsampled components: %u", frame.cps);
+
+    // see http://lclevy.free.fr/cr2/#sraw for overview table
+    bool isSupported = frame.compInfo[0].superH == 2;
+
+    isSupported = isSupported && (frame.compInfo[0].superV == 1 ||
+                                  frame.compInfo[0].superV == 2);
+
+    for (uint32 i = 1; i < frame.cps; i++)
+      isSupported = isSupported && frame.compInfo[i].superH == 1 &&
+                    frame.compInfo[i].superV == 1;
+
+    if (!isSupported) {
+      ThrowRDE("Unsupported subsampling ([[%u, %u], [%u, %u], [%u, %u]])",
+               frame.compInfo[0].superH, frame.compInfo[0].superV,
+               frame.compInfo[1].superH, frame.compInfo[1].superV,
+               frame.compInfo[2].superH, frame.compInfo[2].superV);
+    }
 
     if (frame.compInfo[0].superV == 2)
       decodeN_X_Y<3, 2, 2>(); // Cr2 sRaw1/mRaw
@@ -94,7 +108,7 @@ void Cr2Decompressor::decodeN_X_Y()
 {
   auto ht = getHuffmanTables<N_COMP>();
   auto pred = getInitialPredictors<N_COMP>();
-  auto predNext = (ushort16*)mRaw->getDataUncropped(0, 0);
+  auto predNext = reinterpret_cast<ushort16*>(mRaw->getDataUncropped(0, 0));
 
   BitPumpJPEG bitStream(input);
 
@@ -139,9 +153,10 @@ void Cr2Decompressor::decodeN_X_Y()
       unsigned destY = processedLineSlices % mRaw->dim.y;
       unsigned destX =
           processedLineSlices / mRaw->dim.y * slicesWidths[0] / mRaw->getCpp();
-      if (destX >= (unsigned)mRaw->dim.x)
+      if (destX >= static_cast<unsigned>(mRaw->dim.x))
         break;
-      auto dest = (ushort16*)mRaw->getDataUncropped(destX, destY);
+      auto dest =
+          reinterpret_cast<ushort16*>(mRaw->getDataUncropped(destX, destY));
 
       for (unsigned x = 0; x < sliceWidth; x += xStepSize) {
         // check if we processed one full raw row worth of pixels

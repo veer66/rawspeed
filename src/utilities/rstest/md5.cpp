@@ -38,9 +38,9 @@ namespace rawspeed {
 namespace md5 {
 
 // hashes 64 bytes at once
-static void md5_compress(md5_state& state, const uint8_t block[64]);
+static void md5_compress(md5_state* state, const uint8_t block[64]);
 
-static void md5_compress(md5_state& state, const uint8_t block[64]) {
+static void md5_compress(md5_state* state, const uint8_t block[64]) {
 #define LOADSCHEDULE(i)                                                        \
   schedule[i] =                                                                \
       (uint32_t)block[(i)*4 + 0] << 0 | (uint32_t)block[(i)*4 + 1] << 8 |      \
@@ -78,10 +78,10 @@ static void md5_compress(md5_state& state, const uint8_t block[64]) {
   a = 0UL + (a) + (expr) + UINT32_C(t) + schedule[k];                          \
   (a) = 0UL + (b) + ROTL32(a, s);
 
-  uint32_t a = state[0];
-  uint32_t b = state[1];
-  uint32_t c = state[2];
-  uint32_t d = state[3];
+  uint32_t a = (*state)[0];
+  uint32_t b = (*state)[1];
+  uint32_t c = (*state)[2];
+  uint32_t d = (*state)[3];
 
   ROUND0(a, b, c, d, 0, 7, 0xD76AA478)
   ROUND0(d, a, b, c, 1, 12, 0xE8C7B756)
@@ -148,16 +148,16 @@ static void md5_compress(md5_state& state, const uint8_t block[64]) {
   ROUND3(c, d, a, b, 2, 15, 0x2AD7D2BB)
   ROUND3(b, c, d, a, 9, 21, 0xEB86D391)
 
-  state[0] = 0UL + state[0] + a;
-  state[1] = 0UL + state[1] + b;
-  state[2] = 0UL + state[2] + c;
-  state[3] = 0UL + state[3] + d;
+  (*state)[0] = 0UL + (*state)[0] + a;
+  (*state)[1] = 0UL + (*state)[1] + b;
+  (*state)[2] = 0UL + (*state)[2] + c;
+  (*state)[3] = 0UL + (*state)[3] + d;
 }
 
 /* Full message hasher */
 
-void md5_hash(const uint8_t* message, size_t len, md5_state& hash) {
-  hash = md5_init;
+void md5_hash(const uint8_t* message, size_t len, md5_state* hash) {
+  *hash = md5_init;
 
   size_t i;
   for (i = 0; len - i >= 64; i += 64)
@@ -177,17 +177,19 @@ void md5_hash(const uint8_t* message, size_t len, md5_state& hash) {
     memset(block, 0, 56);
   }
 
-  block[64 - 8] = (uint8_t)((len & 0x1FU) << 3);
+  block[64 - 8] = static_cast<uint8_t>((len & 0x1FU) << 3);
   len >>= 5;
-  for (i = 1; i < 8; i++, len >>= 8)
-    block[64 - 8 + i] = (uint8_t)len;
+  for (i = 1; i < 8; i++) {
+    block[64 - 8 + i] = static_cast<uint8_t>(len);
+    len >>= 8;
+  }
   md5_compress(hash, block);
 }
 
 std::string hash_to_string(const md5_state& hash) {
   char res[2 * sizeof(hash) + 1];
-  auto* h = (const uint8_t*)(&hash[0]);
-  for (int i = 0; i < (int)sizeof(hash); ++i)
+  auto* h = reinterpret_cast<const uint8_t*>(&hash[0]);
+  for (int i = 0; i < static_cast<int>(sizeof(hash)); ++i)
     snprintf(res + 2 * i, 3, "%02x", h[i]);
   res[32] = 0;
   return res;
@@ -195,7 +197,7 @@ std::string hash_to_string(const md5_state& hash) {
 
 std::string md5_hash(const uint8_t* message, size_t len) {
   md5_state hash;
-  md5_hash(message, len, hash);
+  md5_hash(message, len, &hash);
   return hash_to_string(hash);
 }
 

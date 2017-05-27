@@ -48,6 +48,16 @@ using std::ostringstream;
 
 namespace rawspeed {
 
+bool SrwDecoder::isAppropriateDecoder(const TiffRootIFD* rootIFD,
+                                      const Buffer* file) {
+  const auto id = rootIFD->getID();
+  const std::string& make = id.make;
+
+  // FIXME: magic
+
+  return make == "SAMSUNG";
+}
+
 RawImage SrwDecoder::decodeRawInternal() {
   auto raw = mRootIFD->getIFDWithTag(STRIPOFFSETS);
 
@@ -60,15 +70,15 @@ RawImage SrwDecoder::decodeRawInternal() {
   if (32769 == compression)
   {
     bool bit_order = hints.get("msb_override", false);
-    this->decodeUncompressed(raw, bit_order ? BitOrder_Jpeg : BitOrder_Plain);
+    this->decodeUncompressed(raw, bit_order ? BitOrder_MSB : BitOrder_LSB);
     return mRaw;
   }
 
   if (32770 == compression)
   {
-    if (!raw->hasEntry ((TiffTag)40976)) {
+    if (!raw->hasEntry(static_cast<TiffTag>(40976))) {
       bool bit_order = hints.get("msb_override", bits == 12);
-      this->decodeUncompressed(raw, bit_order ? BitOrder_Jpeg : BitOrder_Plain);
+      this->decodeUncompressed(raw, bit_order ? BitOrder_MSB : BitOrder_LSB);
       return mRaw;
     }
     uint32 nslices = raw->getEntry(STRIPOFFSETS)->count;
@@ -109,7 +119,8 @@ void SrwDecoder::decodeCompressed( const TiffIFD* raw )
   mRaw->dim = iPoint2D(width, height);
   mRaw->createData();
   const uint32 offset = raw->getEntry(STRIPOFFSETS)->getU32();
-  uint32 compressed_offset = raw->getEntry((TiffTag)40976)->getU32();
+  uint32 compressed_offset =
+      raw->getEntry(static_cast<TiffTag>(40976))->getU32();
 
   ByteStream bs(mFile, compressed_offset, getHostEndianness() == little);
 
@@ -122,12 +133,14 @@ void SrwDecoder::decodeCompressed( const TiffIFD* raw )
       i = y < 2 ? 7 : 4;
     BitPumpMSB32 bits(mFile, line_offset);
     int op[4];
-    auto *img = (ushort16 *)mRaw->getData(0, y);
-    const auto* const past_last =
-        (ushort16*)(mRaw->getData(width - 1, y) + mRaw->getBpp());
+    auto* img = reinterpret_cast<ushort16*>(mRaw->getData(0, y));
+    const auto* const past_last = reinterpret_cast<ushort16*>(
+        mRaw->getData(width - 1, y) + mRaw->getBpp());
 
-    ushort16* img_up = (ushort16*)mRaw->getData(0, max(0, (int)y - 1));
-    ushort16* img_up2 = (ushort16*)mRaw->getData(0, max(0, (int)y - 2));
+    ushort16* img_up = reinterpret_cast<ushort16*>(
+        mRaw->getData(0, max(0, static_cast<int>(y) - 1)));
+    ushort16* img_up2 = reinterpret_cast<ushort16*>(
+        mRaw->getData(0, max(0, static_cast<int>(y) - 2)));
     // Image is arranged in groups of 16 pixels horizontally
     for (uint32 x = 0; x < width; x += 16) {
       bits.fill();
@@ -156,10 +169,10 @@ void SrwDecoder::decodeCompressed( const TiffIFD* raw )
         // Upward prediction
         // First we decode even pixels
         for (int c = 0; c < 16; c += 2) {
-          int b = len[(c >> 3)];
+          int b = len[c >> 3];
           int32 adj = 0;
           if (b)
-            adj = ((int32)bits.getBits(b) << (32 - b) >> (32 - b));
+            adj = (static_cast<int32>(bits.getBits(b)) << (32 - b) >> (32 - b));
           img[c] = adj + img_up[c];
         }
         // Now we decode odd pixels
@@ -169,29 +182,29 @@ void SrwDecoder::decodeCompressed( const TiffIFD* raw )
           int b = len[2 | (c >> 3)];
           int32 adj = 0;
           if (b)
-            adj = ((int32)bits.getBits(b) << (32 - b) >> (32 - b));
+            adj = (static_cast<int32>(bits.getBits(b)) << (32 - b) >> (32 - b));
           img[c] = adj + img_up2[c];
         }
       } else {
         // Left to right prediction
         // First we decode even pixels
-        int pred_left = x ? img[-2] : 128;
+        int pred_left = x != 0 ? img[-2] : 128;
         for (int c = 0; c < 16; c += 2) {
-          int b = len[(c >> 3)];
+          int b = len[c >> 3];
           int32 adj = 0;
           if (b)
-            adj = ((int32)bits.getBits(b) << (32 - b) >> (32 - b));
+            adj = (static_cast<int32>(bits.getBits(b)) << (32 - b) >> (32 - b));
 
           if (img + c < past_last)
             img[c] = adj + pred_left;
         }
         // Now we decode odd pixels
-        pred_left = x ? img[-1] : 128;
+        pred_left = x != 0 ? img[-1] : 128;
         for (int c = 1; c < 16; c += 2) {
           int b = len[2 | (c >> 3)];
           int32 adj = 0;
           if (b)
-            adj = ((int32)bits.getBits(b) << (32 - b) >> (32 - b));
+            adj = (static_cast<int32>(bits.getBits(b)) << (32 - b) >> (32 - b));
 
           if (img + c < past_last)
             img[c] = adj + pred_left;
@@ -205,8 +218,8 @@ void SrwDecoder::decodeCompressed( const TiffIFD* raw )
 
   // Swap red and blue pixels to get the final CFA pattern
   for (uint32 y = 0; y < height-1; y+=2) {
-    auto *topline = (ushort16 *)mRaw->getData(0, y);
-    auto *bottomline = (ushort16 *)mRaw->getData(0, y + 1);
+    auto* topline = reinterpret_cast<ushort16*>(mRaw->getData(0, y));
+    auto* bottomline = reinterpret_cast<ushort16*>(mRaw->getData(0, y + 1));
     for (uint32 x = 0; x < width-1; x += 2) {
       ushort16 temp = topline[1];
       topline[1] = bottomline[0];
@@ -241,7 +254,8 @@ void SrwDecoder::decodeCompressed2( const TiffIFD* raw, int bits)
   const uchar8 tab[14][2] = {{3,4}, {3,7}, {2,6}, {2,5}, {4,3}, {6,0}, {7,9},
                                {8,10}, {9,11}, {10,12}, {10,13}, {5,1}, {4,8}, {4,2}};
   vector<encTableItem> tbl(1024);
-  ushort16 vpred[2][2] = {{0,0},{0,0}}, hpred[2];
+  ushort16 vpred[2][2] = {{0, 0}, {0, 0}};
+  ushort16 hpred[2];
 
   // We generate a 1024 entry table (to be addressed by reading 10 bits) by
   // consecutively filling in 2^(10-N) positions where N is the variable number of
@@ -254,15 +268,16 @@ void SrwDecoder::decodeCompressed2( const TiffIFD* raw, int bits)
   for (auto i : tab) {
     for (int32 c = 0; c < (1024 >> i[0]); c++) {
       tbl[n].encLen = i[0];
-      tbl[n++].diffLen = i[1];
+      tbl[n].diffLen = i[1];
+      n++;
     }
   }
 
   BitPumpMSB pump(mFile, offset);
   for (uint32 y = 0; y < height; y++) {
-    auto *img = (ushort16 *)mRaw->getData(0, y);
+    auto* img = reinterpret_cast<ushort16*>(mRaw->getData(0, y));
     for (uint32 x = 0; x < width; x++) {
-      int32 diff = samsungDiff(pump, tbl);
+      int32 diff = samsungDiff(&pump, tbl);
       if (x < 2)
         hpred[x] = vpred[y & 1][x] += diff;
       else
@@ -274,18 +289,18 @@ void SrwDecoder::decodeCompressed2( const TiffIFD* raw, int bits)
   }
 }
 
-int32 SrwDecoder::samsungDiff(BitPumpMSB& pump,
+int32 SrwDecoder::samsungDiff(BitPumpMSB* pump,
                               const vector<encTableItem>& tbl) {
   // We read 10 bits to index into our table
-  uint32 c = pump.peekBits(10);
+  uint32 c = pump->peekBits(10);
   // Skip the bits that were used to encode this case
-  pump.getBits(tbl[c].encLen);
+  pump->getBits(tbl[c].encLen);
   // Read the number of bits the table tells me
   int32 len = tbl[c].diffLen;
-  int32 diff = pump.getBits(len);
+  int32 diff = pump->getBits(len);
 
   // If the first bit is 0 we need to turn this into a negative number
-  diff = len ? HuffmanTable::signExtended(diff, len) : diff;
+  diff = len != 0 ? HuffmanTable::signExtended(diff, len) : diff;
 
   return diff;
 }
@@ -345,9 +360,11 @@ void SrwDecoder::decodeCompressed3(const TiffIFD* raw, int bits)
       line_offset += 16 - (line_offset & 0xf);
     BitPumpMSB32 pump(mFile, offset+line_offset);
 
-    auto *img = (ushort16 *)mRaw->getData(0, row);
-    ushort16* img_up = (ushort16*)mRaw->getData(0, max(0, (int)row - 1));
-    ushort16* img_up2 = (ushort16*)mRaw->getData(0, max(0, (int)row - 2));
+    auto* img = reinterpret_cast<ushort16*>(mRaw->getData(0, row));
+    ushort16* img_up = reinterpret_cast<ushort16*>(
+        mRaw->getData(0, max(0, static_cast<int>(row) - 1)));
+    ushort16* img_up2 = reinterpret_cast<ushort16*>(
+        mRaw->getData(0, max(0, static_cast<int>(row) - 2)));
     // Initialize the motion and diff modes at the start of the line
     motion = 7;
     // By default we are not scaling values at all
@@ -391,7 +408,7 @@ void SrwDecoder::decodeCompressed3(const TiffIFD* raw, int bits)
           if ((row+i) & 0x1) // Red or blue pixels use same color two lines up
             refpixel = img_up2 + i + slideOffset;
           else // Green pixel N uses Green pixel N from row above (top left or top right)
-            refpixel = img_up + i + slideOffset + ((i%2) ? -1 : 1);
+            refpixel = img_up + i + slideOffset + (((i % 2) != 0) ? -1 : 1);
 
           // In some cases we use as reference interpolation of this pixel and the next
           if (doAverage)
@@ -411,12 +428,21 @@ void SrwDecoder::decodeCompressed3(const TiffIFD* raw, int bits)
           // The color is 0-Green 1-Blue 2-Red
           uint32 colornum = (row % 2 != 0) ? i>>1 : ((i>>1)+2) % 3;
           assert(flags[i] <= 3);
-          switch(flags[i]) {
-            case 0: diffBits[i] = diffBitsMode[colornum][0]; break;
-            case 1: diffBits[i] = diffBitsMode[colornum][0]+1; break;
-            case 2: diffBits[i] = diffBitsMode[colornum][0]-1; break;
-            case 3: diffBits[i] = pump.getBits(4); break;
-            default: __builtin_unreachable(); break;
+          switch (flags[i]) {
+          case 0:
+            diffBits[i] = diffBitsMode[colornum][0];
+            break;
+          case 1:
+            diffBits[i] = diffBitsMode[colornum][0] + 1;
+            break;
+          case 2:
+            diffBits[i] = diffBitsMode[colornum][0] - 1;
+            break;
+          case 3:
+            diffBits[i] = pump.getBits(4);
+            break;
+          default:
+            __builtin_unreachable();
           }
           diffBitsMode[colornum][0] = diffBitsMode[colornum][1];
           diffBitsMode[colornum][1] = diffBits[i];
@@ -442,7 +468,7 @@ void SrwDecoder::decodeCompressed3(const TiffIFD* raw, int bits)
           value = &img[((i&0x7)<<1)+(i>>3)];
 
         diff = diff * (scale*2+1) + scale;
-        *value = clampBits((int)*value + diff, bits);
+        *value = clampBits(static_cast<int>(*value) + diff, bits);
       }
 
       img += 16;

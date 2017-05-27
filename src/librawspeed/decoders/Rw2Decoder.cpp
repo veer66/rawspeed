@@ -19,9 +19,9 @@
     Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
 */
 
-#include "rawspeedconfig.h"
 #include "decoders/Rw2Decoder.h"
 #include "common/Common.h"                          // for uint32, uchar8
+#include "common/Mutex.h"                           // for MutexLocker
 #include "common/Point.h"                           // for iPoint2D
 #include "decoders/RawDecoder.h"                    // for RawDecoderThread
 #include "decoders/RawDecoderException.h"           // for RawDecoderExcept...
@@ -41,10 +41,6 @@
 #include <string>                                   // for string, allocator
 #include <vector>                                   // for vector
 
-#ifdef HAVE_PTHREAD
-#include <pthread.h>
-#endif
-
 using std::vector;
 using std::move;
 using std::min;
@@ -54,6 +50,16 @@ using std::fabs;
 namespace rawspeed {
 
 class CameraMetaData;
+
+bool Rw2Decoder::isAppropriateDecoder(const TiffRootIFD* rootIFD,
+                                      const Buffer* file) {
+  const auto id = rootIFD->getID();
+  const std::string& make = id.make;
+
+  // FIXME: magic
+
+  return make == "Panasonic" || make == "LEICA";
+}
 
 struct Rw2Decoder::PanaBitpump {
   static constexpr uint32 BufSize = 0x4000;
@@ -108,8 +114,8 @@ RawImage Rw2Decoder::decodeRawInternal() {
   else
     raw = mRootIFD->getIFDWithTag(STRIPOFFSETS);
 
-  uint32 height = raw->getEntry((TiffTag)3)->getU16();
-  uint32 width = raw->getEntry((TiffTag)2)->getU16();
+  uint32 height = raw->getEntry(static_cast<TiffTag>(3))->getU16();
+  uint32 width = raw->getEntry(static_cast<TiffTag>(2))->getU16();
 
   if (isOldPanasonic) {
     TiffEntry *offsets = raw->getEntry(STRIPOFFSETS);
@@ -166,7 +172,12 @@ void Rw2Decoder::DecodeRw2() {
 }
 
 void Rw2Decoder::decodeThreaded(RawDecoderThread * t) {
-  int x, i, j, sh = 0, pred[2], nonz[2];
+  int x;
+  int i;
+  int j;
+  int sh = 0;
+  int pred[2];
+  int nonz[2];
   int w = mRaw->dim.x / 14;
   uint32 y;
 
@@ -182,60 +193,41 @@ void Rw2Decoder::decodeThreaded(RawDecoderThread * t) {
 
   vector<uint32> zero_pos;
   for (y = t->start_y; y < t->end_y; y++) {
-    auto *dest = (ushort16 *)mRaw->getData(0, y);
+    auto* dest = reinterpret_cast<ushort16*>(mRaw->getData(0, y));
     for (x = 0; x < w; x++) {
       pred[0] = pred[1] = nonz[0] = nonz[1] = 0;
       int u = 0;
-      for (i = 0; i < 14; i++) {
-        // Even pixels
-        if (u == 2)
-        {
-          sh = 4 >> (3 - bits.getBits(2));
-          u = -1;
-        }
-        if (nonz[0]) {
-          if ((j = bits.getBits(8))) {
-            if ((pred[0] -= 0x80 << sh) < 0 || sh == 4)
-              pred[0] &= ~(-(1 << sh));
-            pred[0] += j << sh;
+      for (i = 0; i < 14;) {
+        for (int c = 0; c < 2; c++) {
+          if (u == 2) {
+            sh = 4 >> (3 - bits.getBits(2));
+            u = -1;
           }
-        } else if ((nonz[0] = bits.getBits(8)) || i > 11)
-          pred[0] = nonz[0] << 4 | bits.getBits(4);
-        *dest++ = pred[0];
-        if (zero_is_bad && 0 == pred[0])
-          zero_pos.push_back((y<<16) | (x*14+i));
 
-        // Odd pixels
-        i++;
-        u++;
-        if (u == 2)
-        {
-          sh = 4 >> (3 - bits.getBits(2));
-          u = -1;
+          if (nonz[c]) {
+            if ((j = bits.getBits(8))) {
+              if ((pred[c] -= 0x80 << sh) < 0 || sh == 4)
+                pred[c] &= ~(-(1 << sh));
+              pred[c] += j << sh;
+            }
+          } else if ((nonz[c] = bits.getBits(8)) || i > 11)
+            pred[c] = nonz[c] << 4 | bits.getBits(4);
+
+          *dest = pred[c];
+
+          if (zero_is_bad && 0 == pred[c])
+            zero_pos.push_back((y << 16) | (x * 14 + i));
+
+          i++;
+          u++;
+          dest++;
         }
-        if (nonz[1]) {
-          if ((j = bits.getBits(8))) {
-            if ((pred[1] -= 0x80 << sh) < 0 || sh == 4)
-              pred[1] &= ~(-(1 << sh));
-            pred[1] += j << sh;
-          }
-        } else if ((nonz[1] = bits.getBits(8)) || i > 11)
-          pred[1] = nonz[1] << 4 | bits.getBits(4);
-        *dest++ = pred[1];
-        if (zero_is_bad && 0 == pred[1])
-          zero_pos.push_back((y<<16) | (x*14+i));
-        u++;
       }
     }
   }
   if (zero_is_bad && !zero_pos.empty()) {
-#ifdef HAVE_PTHREAD
-    pthread_mutex_lock(&mRaw->mBadPixelMutex);
-#endif
+    MutexLocker guard(&mRaw->mBadPixelMutex);
     mRaw->mBadPixelPositions.insert(mRaw->mBadPixelPositions.end(), zero_pos.begin(), zero_pos.end());
-#ifdef HAVE_PTHREAD
-    pthread_mutex_unlock(&mRaw->mBadPixelMutex);
-#endif
   }
 }
 
@@ -267,10 +259,15 @@ void Rw2Decoder::decodeMetaDataInternal(const CameraMetaData* meta) {
                            : mRootIFD->getIFDWithTag(STRIPOFFSETS);
 
   // Read blacklevels
-  if (raw->hasEntry((TiffTag)0x1c) && raw->hasEntry((TiffTag)0x1d) && raw->hasEntry((TiffTag)0x1e)) {
-    const int blackRed = raw->getEntry((TiffTag)0x1c)->getU32() + 15;
-    const int blackGreen = raw->getEntry((TiffTag)0x1d)->getU32() + 15;
-    const int blackBlue = raw->getEntry((TiffTag)0x1e)->getU32() + 15;
+  if (raw->hasEntry(static_cast<TiffTag>(0x1c)) &&
+      raw->hasEntry(static_cast<TiffTag>(0x1d)) &&
+      raw->hasEntry(static_cast<TiffTag>(0x1e))) {
+    const int blackRed =
+        raw->getEntry(static_cast<TiffTag>(0x1c))->getU32() + 15;
+    const int blackGreen =
+        raw->getEntry(static_cast<TiffTag>(0x1d))->getU32() + 15;
+    const int blackBlue =
+        raw->getEntry(static_cast<TiffTag>(0x1e))->getU32() + 15;
 
     for(int i = 0; i < 2; i++) {
       for(int j = 0; j < 2; j++) {
@@ -296,41 +293,49 @@ void Rw2Decoder::decodeMetaDataInternal(const CameraMetaData* meta) {
   }
 
   // Read WB levels
-  if (raw->hasEntry((TiffTag)0x0024) && raw->hasEntry((TiffTag)0x0025) && raw->hasEntry((TiffTag)0x0026)) {
-    mRaw->metadata.wbCoeffs[0] = (float) raw->getEntry((TiffTag)0x0024)->getU16();
-    mRaw->metadata.wbCoeffs[1] = (float) raw->getEntry((TiffTag)0x0025)->getU16();
-    mRaw->metadata.wbCoeffs[2] = (float) raw->getEntry((TiffTag)0x0026)->getU16();
-  } else if (raw->hasEntry((TiffTag)0x0011) && raw->hasEntry((TiffTag)0x0012)) {
-    mRaw->metadata.wbCoeffs[0] = (float) raw->getEntry((TiffTag)0x0011)->getU16();
-    mRaw->metadata.wbCoeffs[1] = 256.0f;
-    mRaw->metadata.wbCoeffs[2] = (float) raw->getEntry((TiffTag)0x0012)->getU16();
+  if (raw->hasEntry(static_cast<TiffTag>(0x0024)) &&
+      raw->hasEntry(static_cast<TiffTag>(0x0025)) &&
+      raw->hasEntry(static_cast<TiffTag>(0x0026))) {
+    mRaw->metadata.wbCoeffs[0] = static_cast<float>(
+        raw->getEntry(static_cast<TiffTag>(0x0024))->getU16());
+    mRaw->metadata.wbCoeffs[1] = static_cast<float>(
+        raw->getEntry(static_cast<TiffTag>(0x0025))->getU16());
+    mRaw->metadata.wbCoeffs[2] = static_cast<float>(
+        raw->getEntry(static_cast<TiffTag>(0x0026))->getU16());
+  } else if (raw->hasEntry(static_cast<TiffTag>(0x0011)) &&
+             raw->hasEntry(static_cast<TiffTag>(0x0012))) {
+    mRaw->metadata.wbCoeffs[0] = static_cast<float>(
+        raw->getEntry(static_cast<TiffTag>(0x0011))->getU16());
+    mRaw->metadata.wbCoeffs[1] = 256.0F;
+    mRaw->metadata.wbCoeffs[2] = static_cast<float>(
+        raw->getEntry(static_cast<TiffTag>(0x0012))->getU16());
   }
 }
 
 std::string Rw2Decoder::guessMode() {
-  float ratio = 3.0f / 2.0f;  // Default
+  float ratio = 3.0F / 2.0F; // Default
 
   if (!mRaw->isAllocated())
     return "";
 
-  ratio = (float)mRaw->dim.x / (float)mRaw->dim.y;
+  ratio = static_cast<float>(mRaw->dim.x) / static_cast<float>(mRaw->dim.y);
 
-  float min_diff = fabs(ratio - 16.0f / 9.0f);
+  float min_diff = fabs(ratio - 16.0F / 9.0F);
   std::string closest_match = "16:9";
 
-  float t = fabs(ratio - 3.0f / 2.0f);
+  float t = fabs(ratio - 3.0F / 2.0F);
   if (t < min_diff) {
     closest_match = "3:2";
     min_diff  = t;
   }
 
-  t = fabs(ratio - 4.0f / 3.0f);
+  t = fabs(ratio - 4.0F / 3.0F);
   if (t < min_diff) {
     closest_match =  "4:3";
     min_diff  = t;
   }
 
-  t = fabs(ratio - 1.0f);
+  t = fabs(ratio - 1.0F);
   if (t < min_diff) {
     closest_match = "1:1";
     min_diff  = t;

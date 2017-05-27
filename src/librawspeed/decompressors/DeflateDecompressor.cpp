@@ -27,12 +27,10 @@
 #include "common/Point.h"                 // for iPoint2D
 #include "decoders/RawDecoderException.h" // for ThrowRDE
 #include "io/Endianness.h"                // for getHostEndianness, Endiann...
+#include <cassert>                        // for assert
 #include <cstdio>                         // for size_t
-
-extern "C" {
 #include <zlib.h>
 // IWYU pragma: no_include <zconf.h>
-}
 
 namespace rawspeed {
 
@@ -171,15 +169,15 @@ static inline uint32 __attribute__((const)) fp24ToFloat(uint32 fp24) {
 }
 
 static inline void expandFP16(unsigned char* dst, int width) {
-  auto* dst16 = (ushort16*)dst;
-  auto* dst32 = (uint32*)dst;
+  auto* dst16 = reinterpret_cast<ushort16*>(dst);
+  auto* dst32 = reinterpret_cast<uint32*>(dst);
 
   for (int x = width - 1; x >= 0; x--)
     dst32[x] = fp16ToFloat(dst16[x]);
 }
 
 static inline void expandFP24(unsigned char* dst, int width) {
-  auto* dst32 = (uint32*)dst;
+  auto* dst32 = reinterpret_cast<uint32*>(dst);
   dst += (width - 1) * 3;
   for (int x = width - 1; x >= 0; x--) {
     dst32[x] = fp24ToFloat((dst[0] << 16) | (dst[1] << 8) | dst[2]);
@@ -187,19 +185,20 @@ static inline void expandFP24(unsigned char* dst, int width) {
   }
 }
 
-void DeflateDecompressor::decode(unsigned char** uBuffer, int width, int height,
-                                 uint32 offX, uint32 offY) {
-  uLongf dstLen = width * height * 4UL;
+void DeflateDecompressor::decode(std::unique_ptr<unsigned char[]>* uBuffer,
+                                 int width, int height, uint32 offX,
+                                 uint32 offY) {
+  uLongf dstLen = sizeof(float) * width * height;
 
-  if (!*uBuffer)
-    *uBuffer = new unsigned char[sizeof(float) * width * height];
+  if (!uBuffer->get())
+    *uBuffer = std::unique_ptr<unsigned char[]>(new unsigned char[dstLen]);
 
   const auto cSize = input.getRemainSize();
   const unsigned char* cBuffer = input.getData(cSize);
 
-  int err = uncompress(*uBuffer, &dstLen, cBuffer, cSize);
+  int err = uncompress(uBuffer->get(), &dstLen, cBuffer, cSize);
   if (err != Z_OK) {
-    ThrowRDE("failed to uncompress tile: %d", err);
+    ThrowRDE("failed to uncompress tile: %d (%s)", err, zError(err));
   }
 
   int predFactor = 0;
@@ -219,18 +218,23 @@ void DeflateDecompressor::decode(unsigned char** uBuffer, int width, int height,
   }
 
   int bytesps = bps / 8;
-  size_t thisTileLength =
-      offY + height > (uint32)mRaw->dim.y ? mRaw->dim.y - offY : height;
-  size_t thisTileWidth =
-      offX + width > (uint32)mRaw->dim.x ? mRaw->dim.x - offX : width;
+  size_t thisTileLength = offY + height > static_cast<uint32>(mRaw->dim.y)
+                              ? mRaw->dim.y - offY
+                              : height;
+  size_t thisTileWidth = offX + width > static_cast<uint32>(mRaw->dim.x)
+                             ? mRaw->dim.x - offX
+                             : width;
 
   for (size_t row = 0; row < thisTileLength; ++row) {
-    unsigned char* src = *uBuffer + row * width * bytesps;
+    unsigned char* src = uBuffer->get() + row * width * bytesps;
     unsigned char* dst =
-        (unsigned char*)mRaw->getData() +
+        static_cast<unsigned char*>(mRaw->getData()) +
         ((offY + row) * mRaw->pitch + offX * sizeof(float) * mRaw->getCpp());
+
     if (predFactor)
       decodeFPDeltaRow(src, dst, thisTileWidth, width, bytesps, predFactor);
+
+    assert(bytesps >= 2 && bytesps <= 4);
     switch (bytesps) {
     case 2:
       expandFP16(dst, thisTileWidth);
@@ -239,9 +243,10 @@ void DeflateDecompressor::decode(unsigned char** uBuffer, int width, int height,
       expandFP24(dst, thisTileWidth);
       break;
     case 4:
-    default:
       // No need to expand FP32
       break;
+    default:
+      __builtin_unreachable();
     }
   }
 }
