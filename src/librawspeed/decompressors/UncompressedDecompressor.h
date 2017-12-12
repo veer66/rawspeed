@@ -39,10 +39,10 @@ class UncompressedDecompressor final : public AbstractDecompressor {
   RawImage mRaw;
 
   // check buffer size, throw, or compute minimal height that can be decoded
-  void sanityCheck(uint32* h, int bpl);
+  void sanityCheck(const uint32* h, int bpl);
 
   // check buffer size, throw, or compute minimal height that can be decoded
-  void sanityCheck(uint32 w, uint32* h, int bpp);
+  void sanityCheck(uint32 w, const uint32* h, int bpp);
 
   // for special packed formats
   int bytesPerLine(int w, bool skips);
@@ -58,6 +58,9 @@ public:
   UncompressedDecompressor(const Buffer& data, Buffer::size_type offset,
                            const RawImage& img)
       : UncompressedDecompressor(data, offset, data.getSize() - offset, img) {}
+
+  UncompressedDecompressor(const Buffer& data, const RawImage& img)
+      : UncompressedDecompressor(data, 0, img) {}
 
   /* Helper function for decoders, that will unpack uncompressed image data */
   /* input: Input image, positioned at first pixel */
@@ -86,5 +89,46 @@ public:
   /* Faster version for reading unpacked data */
   template <int bits, Endianness e> void decodeRawUnpacked(uint32 w, uint32 h);
 };
+
+extern template void UncompressedDecompressor::decode8BitRaw<false>(uint32 w,
+                                                                    uint32 h);
+extern template void UncompressedDecompressor::decode8BitRaw<true>(uint32 w,
+                                                                   uint32 h);
+
+extern template void
+UncompressedDecompressor::decode12BitRaw<Endianness::little, false, false>(
+    uint32 w, uint32 h);
+extern template void
+UncompressedDecompressor::decode12BitRaw<Endianness::big, false, false>(
+    uint32 w, uint32 h);
+extern template void
+UncompressedDecompressor::decode12BitRaw<Endianness::big, true, false>(
+    uint32 w, uint32 h);
+extern template void
+UncompressedDecompressor::decode12BitRaw<Endianness::little, false, true>(
+    uint32 w, uint32 h);
+extern template void
+UncompressedDecompressor::decode12BitRaw<Endianness::big, false, true>(
+    uint32 w, uint32 h);
+
+extern template void
+UncompressedDecompressor::decode12BitRawUnpackedLeftAligned<Endianness::big>(
+    uint32 w, uint32 h);
+
+extern template void
+UncompressedDecompressor::decodeRawUnpacked<12, Endianness::little>(uint32 w,
+                                                                    uint32 h);
+extern template void
+UncompressedDecompressor::decodeRawUnpacked<12, Endianness::big>(uint32 w,
+                                                                 uint32 h);
+extern template void
+UncompressedDecompressor::decodeRawUnpacked<14, Endianness::big>(uint32 w,
+                                                                 uint32 h);
+extern template void
+UncompressedDecompressor::decodeRawUnpacked<16, Endianness::little>(uint32 w,
+                                                                    uint32 h);
+extern template void
+UncompressedDecompressor::decodeRawUnpacked<16, Endianness::big>(uint32 w,
+                                                                 uint32 h);
 
 } // namespace rawspeed

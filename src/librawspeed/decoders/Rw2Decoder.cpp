@@ -20,30 +20,23 @@
 */
 
 #include "decoders/Rw2Decoder.h"
-#include "common/Common.h"                          // for uint32, uchar8
-#include "common/Mutex.h"                           // for MutexLocker
+#include "common/Common.h"                          // for writeLog, uint32
 #include "common/Point.h"                           // for iPoint2D
-#include "decoders/RawDecoder.h"                    // for RawDecoderThread
-#include "decoders/RawDecoderException.h"           // for RawDecoderExcept...
+#include "decoders/RawDecoderException.h"           // for ThrowRDE
+#include "decompressors/PanasonicDecompressor.h"    // for PanasonicDecompr...
 #include "decompressors/UncompressedDecompressor.h" // for UncompressedDeco...
 #include "io/Buffer.h"                              // for Buffer
 #include "io/ByteStream.h"                          // for ByteStream
-#include "io/Endianness.h"                          // for Endianness
+#include "io/Endianness.h"                          // for Endianness, Endi...
 #include "metadata/Camera.h"                        // for Hints
 #include "metadata/ColorFilterArray.h"              // for CFAColor::CFA_GREEN
 #include "tiff/TiffEntry.h"                         // for TiffEntry
 #include "tiff/TiffIFD.h"                           // for TiffIFD, TiffRoo...
 #include "tiff/TiffTag.h"                           // for TiffTag, TiffTag...
-#include <algorithm>                                // for min, move
 #include <cmath>                                    // for fabs
-#include <cstring>                                  // for memcpy
 #include <memory>                                   // for unique_ptr
-#include <string>                                   // for string, allocator
-#include <vector>                                   // for vector
+#include <string>                                   // for string, operator==
 
-using std::vector;
-using std::move;
-using std::min;
 using std::string;
 using std::fabs;
 
@@ -61,49 +54,6 @@ bool Rw2Decoder::isAppropriateDecoder(const TiffRootIFD* rootIFD,
   return make == "Panasonic" || make == "LEICA";
 }
 
-struct Rw2Decoder::PanaBitpump {
-  static constexpr uint32 BufSize = 0x4000;
-  ByteStream input;
-  vector<uchar8> buf;
-  int vbits = 0;
-  uint32 load_flags;
-
-  PanaBitpump(ByteStream&& input_, int load_flags_)
-    : input(move(input_)), load_flags(load_flags_)
-  {
-    // get one more byte, so the return statement of getBits does not have
-    // to special case for accessing the last byte
-    buf.resize(BufSize + 1UL);
-  }
-
-  void skipBytes(int bytes)
-  {
-    int blocks = (bytes / BufSize) * BufSize;
-    input.skipBytes(blocks);
-    for (int i = blocks; i < bytes; i++)
-      (void)getBits(8);
-  }
-
-  uint32 getBits(int nbits)
-  {
-    if (!vbits) {
-      /* On truncated files this routine will just return just for the truncated
-      * part of the file. Since there is no chance of affecting output buffer
-      * size we allow the decoder to decode this
-      */
-      auto size = min(input.getRemainSize(), BufSize - load_flags);
-      memcpy(buf.data() + load_flags, input.getData(size), size);
-
-      size = min(input.getRemainSize(), load_flags);
-      if (size != 0)
-        memcpy(buf.data(), input.getData(size), size);
-    }
-    vbits = (vbits - nbits) & 0x1ffff;
-    int byte = vbits >> 3 ^ 0x3ff0;
-    return (buf[byte] | buf[byte + 1UL] << 8) >> (vbits & 7) & ~(-(1 << nbits));
-  }
-};
-
 RawImage Rw2Decoder::decodeRawInternal() {
 
   const TiffIFD* raw = nullptr;
@@ -118,6 +68,9 @@ RawImage Rw2Decoder::decodeRawInternal() {
   uint32 width = raw->getEntry(static_cast<TiffTag>(2))->getU16();
 
   if (isOldPanasonic) {
+    if (width == 0 || height == 0 || width > 4330 || height > 2751)
+      ThrowRDE("Unexpected image dimensions found: (%u; %u)", width, height);
+
     TiffEntry *offsets = raw->getEntry(STRIPOFFSETS);
 
     if (offsets->count != 1) {
@@ -128,7 +81,6 @@ RawImage Rw2Decoder::decodeRawInternal() {
       ThrowRDE("Invalid image data offset, cannot decode.");
 
     mRaw->dim = iPoint2D(width, height);
-    mRaw->createData();
 
     uint32 size = mFile->getSize() - offset;
 
@@ -136,19 +88,24 @@ RawImage Rw2Decoder::decodeRawInternal() {
 
     if (size >= width*height*2) {
       // It's completely unpacked little-endian
-      u.decodeRawUnpacked<12, little>(width, height);
+      mRaw->createData();
+      u.decodeRawUnpacked<12, Endianness::little>(width, height);
     } else if (size >= width*height*3/2) {
       // It's a packed format
-      u.decode12BitRaw<little, false, true>(width, height);
+      mRaw->createData();
+      u.decode12BitRaw<Endianness::little, false, true>(width, height);
     } else {
       // It's using the new .RW2 decoding method
       load_flags = 0;
-      DecodeRw2();
+      // It's using the new .RW2 decoding method
+      PanasonicDecompressor p(mRaw, ByteStream(mFile, offset),
+                              hints.has("zero_is_not_bad"), load_flags);
+      mRaw->createData();
+      p.decompress();
     }
   } else {
-
     mRaw->dim = iPoint2D(width, height);
-    mRaw->createData();
+
     TiffEntry *offsets = raw->getEntry(PANASONIC_STRIPOFFSET);
 
     if (offsets->count != 1) {
@@ -160,75 +117,16 @@ RawImage Rw2Decoder::decodeRawInternal() {
     if (!mFile->isValid(offset))
       ThrowRDE("Invalid image data offset, cannot decode.");
 
+    // It's using the new .RW2 decoding method
     load_flags = 0x2008;
-    DecodeRw2();
+    // It's using the new .RW2 decoding method
+    PanasonicDecompressor p(mRaw, ByteStream(mFile, offset),
+                            hints.has("zero_is_not_bad"), load_flags);
+    mRaw->createData();
+    p.decompress();
   }
 
   return mRaw;
-}
-
-void Rw2Decoder::DecodeRw2() {
-  startThreads();
-}
-
-void Rw2Decoder::decodeThreaded(RawDecoderThread * t) {
-  int x;
-  int i;
-  int j;
-  int sh = 0;
-  int pred[2];
-  int nonz[2];
-  int w = mRaw->dim.x / 14;
-  uint32 y;
-
-  bool zero_is_bad = ! hints.has("zero_is_not_bad");
-
-  /* 9 + 1/7 bits per pixel */
-  int skip = w * 14 * t->start_y * 9;
-  skip += w * 2 * t->start_y;
-  skip /= 8;
-
-  PanaBitpump bits(ByteStream(mFile, offset), load_flags);
-  bits.skipBytes(skip);
-
-  vector<uint32> zero_pos;
-  for (y = t->start_y; y < t->end_y; y++) {
-    auto* dest = reinterpret_cast<ushort16*>(mRaw->getData(0, y));
-    for (x = 0; x < w; x++) {
-      pred[0] = pred[1] = nonz[0] = nonz[1] = 0;
-      int u = 0;
-      for (i = 0; i < 14;) {
-        for (int c = 0; c < 2; c++) {
-          if (u == 2) {
-            sh = 4 >> (3 - bits.getBits(2));
-            u = -1;
-          }
-
-          if (nonz[c]) {
-            if ((j = bits.getBits(8))) {
-              if ((pred[c] -= 0x80 << sh) < 0 || sh == 4)
-                pred[c] &= ~(-(1 << sh));
-              pred[c] += j << sh;
-            }
-          } else if ((nonz[c] = bits.getBits(8)) || i > 11)
-            pred[c] = nonz[c] << 4 | bits.getBits(4);
-
-          *dest = pred[c];
-
-          if (zero_is_bad && 0 == pred[c])
-            zero_pos.push_back((y << 16) | (x * 14 + i));
-
-          i++;
-          u++;
-          dest++;
-        }
-      }
-    }
-  }
-  if (zero_is_bad && !zero_pos.empty()) {
-    MutexLocker guard(&mRaw->mBadPixelMutex);
-    mRaw->mBadPixelPositions.insert(mRaw->mBadPixelPositions.end(), zero_pos.begin(), zero_pos.end());
-  }
 }
 
 void Rw2Decoder::checkSupportInternal(const CameraMetaData* meta) {
@@ -286,7 +184,6 @@ void Rw2Decoder::decodeMetaDataInternal(const CameraMetaData* meta) {
           default:
             ThrowRDE("Unexpected CFA color %s.",
                      ColorFilterArray::colorToString(c).c_str());
-            break;
         }
       }
     }

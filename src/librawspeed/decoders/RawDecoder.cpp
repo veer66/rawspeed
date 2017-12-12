@@ -19,16 +19,15 @@
     Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
 */
 
-#include "rawspeedconfig.h" // for HAVE_PTHREAD
+#include "rawspeedconfig.h"
 #include "decoders/RawDecoder.h"
-#include "common/Common.h"                          // for uint32, getThrea...
+#include "common/Common.h"                          // for uint32, splitString
 #include "common/Point.h"                           // for iPoint2D, iRecta...
 #include "decoders/RawDecoderException.h"           // for ThrowRDE, RawDec...
 #include "decompressors/UncompressedDecompressor.h" // for UncompressedDeco...
 #include "io/Buffer.h"                              // for Buffer
 #include "io/FileIOException.h"                     // for FileIOException
 #include "io/IOException.h"                         // for IOException
-#include "metadata/BlackArea.h"                     // for BlackArea
 #include "metadata/Camera.h"                        // for Camera, Hints
 #include "metadata/CameraMetaData.h"                // for CameraMetaData
 #include "metadata/CameraSensorInfo.h"              // for CameraSensorInfo
@@ -37,14 +36,11 @@
 #include "tiff/TiffEntry.h"                         // for TiffEntry
 #include "tiff/TiffIFD.h"                           // for TiffIFD
 #include "tiff/TiffTag.h"                           // for TiffTag::STRIPOF...
-#include <algorithm>                                // for min
-#include <memory>                                   // for allocator_traits...
 #include <string>                                   // for string, basic_st...
 #include <vector>                                   // for vector
 
 using std::vector;
 using std::string;
-using std::min;
 
 namespace rawspeed {
 
@@ -59,7 +55,6 @@ RawDecoder::RawDecoder(const Buffer* file)
 }
 
 void RawDecoder::decodeUncompressed(const TiffIFD *rawIFD, BitOrder order) {
-  uint32 nslices = rawIFD->getEntry(STRIPOFFSETS)->count;
   TiffEntry *offsets = rawIFD->getEntry(STRIPOFFSETS);
   TiffEntry *counts = rawIFD->getEntry(STRIPBYTECOUNTS);
   uint32 yPerSlice = rawIFD->getEntry(ROWSPERSTRIP)->getU32();
@@ -67,13 +62,43 @@ void RawDecoder::decodeUncompressed(const TiffIFD *rawIFD, BitOrder order) {
   uint32 height = rawIFD->getEntry(IMAGELENGTH)->getU32();
   uint32 bitPerPixel = rawIFD->getEntry(BITSPERSAMPLE)->getU32();
 
+  if (width == 0 || height == 0 || width > 5632 || height > 3720)
+    ThrowRDE("Unexpected image dimensions found: (%u; %u)", width, height);
+
+  mRaw->dim = iPoint2D(width, height);
+
+  if (counts->count != offsets->count) {
+    ThrowRDE("Byte count number does not match strip size: "
+             "count:%u, stips:%u ",
+             counts->count, offsets->count);
+  }
+
+  const uint32 yTotal = yPerSlice * counts->count;
+  if (yPerSlice == 0 || yTotal != static_cast<uint32>(mRaw->dim.y)) {
+    ThrowRDE("Invalid y per slice %u or strip count %u (height = %u, got %u)",
+             yPerSlice, counts->count, mRaw->dim.y, yTotal);
+  }
+
+  switch (bitPerPixel) {
+  case 12:
+  case 14:
+    break;
+  default:
+    ThrowRDE("Unexpected bits per pixel: %u.", bitPerPixel);
+  };
+
   vector<RawSlice> slices;
+  slices.reserve(counts->count);
   uint32 offY = 0;
 
-  for (uint32 s = 0; s < nslices; s++) {
+  for (uint32 s = 0; s < counts->count; s++) {
     RawSlice slice;
     slice.offset = offsets->getU32(s);
     slice.count = counts->getU32(s);
+
+    if (slice.count < 1)
+      ThrowRDE("Slice %u is empty", s);
+
     if (offY + yPerSlice > height)
       slice.h = height - offY;
     else
@@ -81,16 +106,22 @@ void RawDecoder::decodeUncompressed(const TiffIFD *rawIFD, BitOrder order) {
 
     offY += yPerSlice;
 
-    if (mFile->isValid(slice.offset, slice.count)) // Only decode if size is valid
-      slices.push_back(slice);
+    if (!mFile->isValid(slice.offset, slice.count))
+      ThrowRDE("Slice offset/count invalid");
+
+    slices.push_back(slice);
   }
 
   if (slices.empty())
     ThrowRDE("No valid slices found. File probably truncated.");
 
-  mRaw->dim = iPoint2D(width, offY);
+  assert(height == offY);
+  assert(slices.size() == counts->count);
+
   mRaw->createData();
-  mRaw->whitePoint = (1<<bitPerPixel)-1;
+
+  // Default white level is (2 ** BitsPerSample) - 1
+  mRaw->whitePoint = (1UL << bitPerPixel) - 1UL;
 
   offY = 0;
   for (uint32 i = 0; i < slices.size(); i++) {
@@ -101,9 +132,11 @@ void RawDecoder::decodeUncompressed(const TiffIFD *rawIFD, BitOrder order) {
     bitPerPixel = static_cast<int>(
         static_cast<uint64>(static_cast<uint64>(slice.count) * 8U) /
         (slice.h * width));
+    const auto inputPitch = width * bitPerPixel / 8;
+    if (!inputPitch)
+      ThrowRDE("Bad input pitch. Can not decode anything.");
     try {
-      u.readUncompressedRaw(size, pos, width * bitPerPixel / 8, bitPerPixel,
-                            order);
+      u.readUncompressedRaw(size, pos, inputPitch, bitPerPixel, order);
     } catch (RawDecoderException &e) {
       if (i>0)
         mRaw->setError(e.what());
@@ -230,76 +263,18 @@ void RawDecoder::setMetaData(const CameraMetaData* meta, const string& make,
   }
 }
 
-
-void *RawDecoderDecodeThread(void *_this) {
-  auto* me = static_cast<RawDecoderThread*>(_this);
-  try {
-     me->parent->decodeThreaded(me);
-  } catch (RawDecoderException &ex) {
-    me->parent->mRaw->setError(ex.what());
-  } catch (IOException &ex) {
-    me->parent->mRaw->setError(ex.what());
-  }
-  return nullptr;
-}
-
-void RawDecoder::startThreads() {
-#ifndef HAVE_PTHREAD
-  uint32 threads = 1;
-  RawDecoderThread t(this);
-  t.start_y = 0;
-  t.end_y = mRaw->dim.y;
-  RawDecoderDecodeThread(&t);
-#else
-  uint32 threads;
-  bool fail = false;
-  threads = min(static_cast<unsigned>(mRaw->dim.y), getThreadCount());
-  int y_offset = 0;
-  int y_per_thread = (mRaw->dim.y + threads - 1) / threads;
-
-  vector<RawDecoderThread> t(threads, RawDecoderThread(this));
-
-  /* Initialize and set thread detached attribute */
-  pthread_attr_t attr;
-  pthread_attr_init(&attr);
-  pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
-
-  for (uint32 i = 0; i < threads; i++) {
-    t[i].start_y = y_offset;
-    t[i].end_y = min(y_offset + y_per_thread, mRaw->dim.y);
-    if (pthread_create(&t[i].threadid, &attr, RawDecoderDecodeThread, &t[i]) != 0) {
-      // If a failure occurs, we need to wait for the already created threads to finish
-      threads = i-1;
-      fail = true;
-    }
-    y_offset = t[i].end_y;
-  }
-
-  for (uint32 i = 0; i < threads; i++) {
-    pthread_join(t[i].threadid, nullptr);
-  }
-  pthread_attr_destroy(&attr);
-
-  if (fail) {
-    ThrowRDE("Unable to start threads");
-  }
-#endif
-
-  if (mRaw->isTooManyErrors(threads))
-    ThrowRDE("All threads reported errors. Cannot load image.");
-}
-
-void RawDecoder::decodeThreaded(RawDecoderThread * t) {
-  ThrowRDE("This class does not support threaded decoding");
-}
-
 rawspeed::RawImage RawDecoder::decodeRaw() {
   try {
     RawImage raw = decodeRawInternal();
+    raw->checkMemIsInitialized();
+
     raw->metadata.pixelAspectRatio =
         hints.get("pixel_aspect_ratio", raw->metadata.pixelAspectRatio);
-    if (interpolateBadPixels)
+    if (interpolateBadPixels) {
       raw->fixBadPixels();
+      raw->checkMemIsInitialized();
+    }
+
     return raw;
   } catch (TiffParserException &e) {
     ThrowRDE("%s", e.what());
@@ -308,7 +283,6 @@ rawspeed::RawImage RawDecoder::decodeRaw() {
   } catch (IOException &e) {
     ThrowRDE("%s", e.what());
   }
-  return RawImage(nullptr);
 }
 
 void RawDecoder::decodeMetaData(const CameraMetaData* meta) {
@@ -333,51 +307,6 @@ void RawDecoder::checkSupport(const CameraMetaData* meta) {
   } catch (IOException &e) {
     ThrowRDE("%s", e.what());
   }
-}
-
-void RawDecoder::startTasks( uint32 tasks )
-{
-  uint32 threads;
-  threads = min(tasks, getThreadCount());
-  int ctask = 0;
-  vector<RawDecoderThread> t(threads, RawDecoderThread(this));
-
-  // We don't need a thread
-  if (threads == 1) {
-    while (static_cast<uint32>(ctask) < tasks) {
-      t[0].taskNo = ctask;
-      RawDecoderDecodeThread(&t[0]);
-      ctask++;
-    }
-    return;
-  }
-
-#ifdef HAVE_PTHREAD
-  pthread_attr_t attr;
-
-  /* Initialize and set thread detached attribute */
-  pthread_attr_init(&attr);
-  pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
-
-  /* TODO: Create a way to re-use threads */
-  void *status;
-  while (static_cast<uint32>(ctask) < tasks) {
-    for (uint32 i = 0; i < threads && static_cast<uint32>(ctask) < tasks; i++) {
-      t[i].taskNo = ctask;
-      pthread_create(&t[i].threadid, &attr, RawDecoderDecodeThread, &t[i]);
-      ctask++;
-    }
-    for (uint32 i = 0; i < threads; i++) {
-      pthread_join(t[i].threadid, &status);
-    }
-  }
-
-  if (mRaw->isTooManyErrors(tasks))
-    ThrowRDE("All threads reported errors. Cannot load image.");
-
-#else
-  ThrowRDE("Unreachable");
-#endif
 }
 
 } // namespace rawspeed

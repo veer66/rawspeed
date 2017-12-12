@@ -1,8 +1,6 @@
-FILE(GLOB DECODER_SOURCES
+FILE(GLOB SOURCES
   "AbstractTiffDecoder.cpp"
   "AbstractTiffDecoder.h"
-  "AriDecoder.cpp"
-  "AriDecoder.h"
   "ArwDecoder.cpp"
   "ArwDecoder.h"
   "Cr2Decoder.cpp"
@@ -15,10 +13,10 @@ FILE(GLOB DECODER_SOURCES
   "DcsDecoder.h"
   "DngDecoder.cpp"
   "DngDecoder.h"
-  "DngDecoderSlices.cpp"
-  "DngDecoderSlices.h"
   "ErfDecoder.cpp"
   "ErfDecoder.h"
+  "IiqDecoder.cpp"
+  "IiqDecoder.h"
   "KdcDecoder.cpp"
   "KdcDecoder.h"
   "MefDecoder.cpp"
@@ -48,8 +46,8 @@ FILE(GLOB DECODER_SOURCES
   "SrwDecoder.h"
   "ThreefrDecoder.cpp"
   "ThreefrDecoder.h"
-  "X3fDecoder.cpp"
-  "X3fDecoder.h"
 )
 
-set(RAWSPEED_SOURCES "${RAWSPEED_SOURCES};${DECODER_SOURCES}" PARENT_SCOPE)
+target_sources(rawspeed PRIVATE
+  ${SOURCES}
+)

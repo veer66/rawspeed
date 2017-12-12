@@ -30,7 +30,6 @@
 #include <cassert>                        // for assert
 #include <cstdio>                         // for size_t
 #include <zlib.h>
-// IWYU pragma: no_include <zconf.h>
 
 namespace rawspeed {
 
@@ -52,7 +51,7 @@ static inline void decodeFPDeltaRow(unsigned char* src, unsigned char* dst,
       dst[col * 3 + 2] = src[col + realTileWidth * 2];
     }
   } else {
-    if (getHostEndianness() == little) {
+    if (getHostEndianness() == Endianness::little) {
       for (size_t col = 0; col < tileWidth; ++col) {
         for (size_t byte = 0; byte < bytesps; ++byte)
           dst[col * bytesps + byte] =

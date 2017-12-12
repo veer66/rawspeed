@@ -23,7 +23,7 @@
 
 #include "common/RawImage.h"              // for RawImage
 #include "decoders/AbstractTiffDecoder.h" // for AbstractTiffDecoder
-#include "tiff/TiffIFD.h"                 // for TiffRootIFDOwner
+#include "tiff/TiffIFD.h"                 // for TiffRootIFD (ptr only)
 #include <algorithm>                      // for move
 
 namespace rawspeed {
@@ -44,11 +44,13 @@ public:
   RawImage decodeRawInternal() override;
   void decodeMetaDataInternal(const CameraMetaData* meta) override;
   void checkSupportInternal(const CameraMetaData* meta) override;
-  static bool isRAF(Buffer* input);
+  static bool isRAF(const Buffer* input);
 
 protected:
   int getDecoderVersion() const override { return 1; }
-  void DecodeRaf();
+
+private:
+  int isCompressed();
 };
 
 } // namespace rawspeed

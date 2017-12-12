@@ -23,6 +23,7 @@
 
 #include "common/Common.h"                      // for uint32, ushort16
 #include "common/RawImage.h"                    // for RawImage
+#include "decoders/RawDecoderException.h"       // for ThrowRDE
 #include "decompressors/AbstractDecompressor.h" // for AbstractDecompressor
 #include "decompressors/HuffmanTable.h"         // for HuffmanTable
 #include "io/Buffer.h"                          // for Buffer, Buffer::size_type
@@ -30,6 +31,7 @@
 #include "io/Endianness.h" // for getHostEndianness, Endiannes...
 #include <array>           // for array
 #include <memory>          // for unique_ptr
+#include <utility>         // for move
 #include <vector>          // for vector
 
 /*
@@ -142,13 +144,12 @@ class AbstractLJpegDecompressor : public AbstractDecompressor {
   std::vector<std::unique_ptr<HuffmanTable>> huffmanTableStore;
   HuffmanTable ht_;      // temporary table, used
 
+  uint32 Pt = 0;
+  std::array<HuffmanTable*, 4> huff{{}}; // 4 pointers into the store
+
 public:
-  AbstractLJpegDecompressor(const Buffer& data, Buffer::size_type offset,
-                            Buffer::size_type size, const RawImage& img)
-      : input(data, offset, size, getHostEndianness() == big), mRaw(img) {}
-  AbstractLJpegDecompressor(const Buffer& data, Buffer::size_type offset,
-                            const RawImage& img)
-      : AbstractLJpegDecompressor(data, offset, data.getSize() - offset, img) {}
+  AbstractLJpegDecompressor(ByteStream bs, const RawImage& img);
+
   virtual ~AbstractLJpegDecompressor() = default;
 
 protected:
@@ -156,16 +157,24 @@ protected:
   bool fullDecodeHT = true;  // FullDecode Huffman
 
   void decode();
-  void parseSOF(SOFInfo* i);
-  void parseSOS();
-  void parseDHT();
+  void parseSOF(ByteStream data, SOFInfo* i);
+  void parseSOS(ByteStream data);
+  void parseDHT(ByteStream data);
   JpegMarker getNextMarker(bool allowskip);
 
   template <int N_COMP>
   std::array<HuffmanTable*, N_COMP> getHuffmanTables() const {
     std::array<HuffmanTable*, N_COMP> ht;
-    for (int i = 0; i < N_COMP; ++i)
-      ht[i] = huff[frame.compInfo[i].dcTblNo];
+    for (int i = 0; i < N_COMP; ++i) {
+      const unsigned dcTblNo = frame.compInfo[i].dcTblNo;
+      const unsigned dcTbls = huff.size();
+      if (dcTblNo >= dcTbls) {
+        ThrowRDE("Decoding table %u for comp %i does not exist (tables = %u)",
+                 dcTblNo, i, dcTbls);
+      }
+      ht[i] = huff[dcTblNo];
+    }
+
     return ht;
   }
 
@@ -173,6 +182,10 @@ protected:
   __attribute__((pure)) std::array<ushort16, N_COMP>
   getInitialPredictors() const {
     std::array<ushort16, N_COMP> pred;
+    if (frame.prec < (Pt + 1)) {
+      ThrowRDE("Invalid precision (%u) and point transform (%u) combination!",
+               frame.prec, Pt);
+    }
     pred.fill(1 << (frame.prec - Pt - 1));
     return pred;
   }
@@ -184,8 +197,6 @@ protected:
 
   SOFInfo frame;
   uint32 predictorMode = 0;
-  uint32 Pt = 0;
-  std::array<HuffmanTable*, 4> huff{{}}; // 4 pointers into the store
 };
 
 } // namespace rawspeed

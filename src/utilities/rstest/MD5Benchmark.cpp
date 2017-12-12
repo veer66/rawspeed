@@ -19,7 +19,7 @@
 */
 
 #include "md5.h"                     // for md5_hash, md5_state
-#include <benchmark/benchmark_api.h> // for State, Benchmark, BENCHMARK
+#include <benchmark/benchmark.h>     // for State, Benchmark, BENCHMARK
 #include <cstdint>                   // for uint8_t
 #include <cstdlib>                   // for free, malloc, size_t
 #include <memory>                    // for unique_ptr
@@ -28,7 +28,7 @@ static inline void BM_MD5(benchmark::State& state) {
   const size_t bufsize = state.range(0) * sizeof(char);
   std::unique_ptr<char, decltype(&free)> buf((char*)malloc(bufsize), &free);
 
-  while (state.KeepRunning()) {
+  for (auto _ : state) {
     rawspeed::md5::md5_state hash;
     rawspeed::md5::md5_hash((uint8_t*)buf.get(), bufsize, &hash);
   }

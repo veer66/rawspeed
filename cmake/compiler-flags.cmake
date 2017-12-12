@@ -2,13 +2,33 @@ include(CheckCXXCompilerFlag)
 include(CpuMarch)
 include(CheckCXXCompilerFlagAndEnableIt)
 
-message(STATUS "Checking for -std=c++11 support")
-CHECK_CXX_COMPILER_FLAG("-std=c++11" COMPILER_SUPPORTS_CXX11)
-if(NOT COMPILER_SUPPORTS_CXX11)
-        message(FATAL_ERROR "The compiler ${CMAKE_CXX_COMPILER} has no C++11 support. Please use a different C++ compiler.")
+# yes, need to keep both the CMAKE_CXX_FLAGS and CMAKE_CXX_STANDARD.
+# with just the CMAKE_CXX_STANDARD, try_compile() breaks:
+#   https://gitlab.kitware.com/cmake/cmake/issues/16456
+# with just the CMAKE_CXX_FLAGS, 'bundled' pugixml breaks tests
+#   https://github.com/darktable-org/rawspeed/issues/112#issuecomment-321517003
+
+message(STATUS "Checking for -std=c++14 support")
+CHECK_CXX_COMPILER_FLAG("-std=c++14" COMPILER_SUPPORTS_CXX14)
+if(NOT COMPILER_SUPPORTS_CXX14)
+  message(WARNING "The compiler ${CMAKE_CXX_COMPILER} has no C++14 support.")
+
+  message(STATUS "Checking for -std=c++1y support")
+  CHECK_CXX_COMPILER_FLAG("-std=c++1y" COMPILER_SUPPORTS_CXX1Y)
+  if(NOT COMPILER_SUPPORTS_CXX1Y)
+    message(FATAL_ERROR "The compiler ${CMAKE_CXX_COMPILER} has no C++14 support. Please use a different C++ compiler.")
+  else()
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++1y")
+    message(STATUS "Checking for -std=c++1y support - works")
+  endif()
+else()
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++14")
+  message(STATUS "Checking for -std=c++14 support - works")
 endif()
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11")
-message(STATUS "Checking for -std=c++11 support - works")
+
+set(CMAKE_CXX_STANDARD 14)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
 
 # always debug info
 add_definitions(-g3)
@@ -20,6 +40,13 @@ if(CMAKE_BUILD_TYPE STREQUAL "RELEASE")
 elseif(NOT (CMAKE_BUILD_TYPE STREQUAL "RELWITHDEBINFO" OR CMAKE_BUILD_TYPE STREQUAL "FUZZ"))
   # if not Release/RelWithDebInfo/Fuzz build, enable extra debug mode
   add_definitions(-DDEBUG)
+
+  # all this does not work with integer sanitizer
+  # add_definitions(-D_GLIBCXX_ASSERTIONS)
+  # add_definitions(-D_GLIBCXX_DEBUG)
+  # add_definitions(-D_GLIBCXX_DEBUG_PEDANTIC)
+
+  add_definitions(-D_GLIBCXX_SANITIZE_VECTOR)
 endif()
 
 IF(NOT APPLE)
@@ -42,11 +69,56 @@ MARK_AS_ADVANCED(
     CMAKE_EXE_LINKER_FLAGS
     CMAKE_MODULE_LINKER_FLAGS )
 
+if(RAWSPEED_ENABLE_LTO)
+  if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+    include(llvm-toolchain)
+    set(lto_compile "-flto=thin")
+    set(lto_link "-flto=thin -fuse-ld=\"${LLVMLLD_EXECUTABLE}\" ${LLVMLLD_INCREMENTAL_LDFLAGS}")
+  elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    include(gcc-toolchain)
+    set(lto_compile "-flto")
+    set(lto_link "-flto")
+  endif()
+
+  set(CMAKE_C_FLAGS
+      "${CMAKE_C_FLAGS} ${lto_compile}"
+      CACHE STRING "Flags used by the C compiler during all builds."
+      FORCE )
+  set(CMAKE_CXX_FLAGS
+      "${CMAKE_CXX_FLAGS} ${lto_compile}"
+      CACHE STRING "Flags used by the C++ compiler during all builds."
+      FORCE )
+  set(CMAKE_EXE_LINKER_FLAGS
+      "${CMAKE_EXE_LINKER_FLAGS} ${lto_link}"
+      CACHE STRING "Flags used for linking binaries during all builds."
+      FORCE )
+  set(CMAKE_SHARED_LINKER_FLAGS
+      "${CMAKE_SHARED_LINKER_FLAGS} ${lto_link}"
+      CACHE STRING "Flags used by the shared libraries linker during all builds."
+      FORCE )
+  set(CMAKE_MODULE_LINKER_FLAGS
+      "${CMAKE_MODULE_LINKER_FLAGS} ${lto_link}"
+      CACHE STRING "Flags used by the module linker during all builds."
+      FORCE )
+  mark_as_advanced(
+      CMAKE_C_FLAGS
+      CMAKE_CXX_FLAGS
+      CMAKE_EXE_LINKER_FLAGS
+      CMAKE_SHARED_LINKER_FLAGS
+      CMAKE_MODULE_LINKER_FLAGS )
+endif()
+
 set(CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG} -O0")
 set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -O0")
 
-set(coverage_compilation "-fprofile-arcs -ftest-coverage")
-set(coverage_link "--coverage")
+if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+  set(coverage_compilation "-fprofile-instr-generate=\"default-%m-%p.profraw\" -fcoverage-mapping")
+  set(coverage_link "")
+elseif(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")
+  set(coverage_compilation "-fprofile-arcs -ftest-coverage")
+  set(coverage_link "--coverage")
+endif()
+
 SET(CMAKE_CXX_FLAGS_COVERAGE
     "${coverage_compilation}"
     CACHE STRING "Flags used by the C++ compiler during coverage builds."
@@ -75,7 +147,7 @@ MARK_AS_ADVANCED(
     CMAKE_MODULE_LINKER_FLAGS_COVERAGE )
 
 # -fstack-protector-all
-set(SANITIZATION_DEFAULTS "-O1 -fno-optimize-sibling-calls")
+set(SANITIZATION_DEFAULTS "-O3 -fno-optimize-sibling-calls")
 
 set(asan "-fsanitize=address -fno-omit-frame-pointer -fno-common -U_FORTIFY_SOURCE")
 if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
@@ -100,8 +172,15 @@ MARK_AS_ADVANCED(
     CMAKE_C_FLAGS_SANITIZE )
 
 set(fuzz "-O3 -ffast-math")
-set(fuzz "${fuzz} ${asan} ${ubsan}")
-set(fuzz "${fuzz} -fsanitize-coverage=trace-pc-guard,indirect-calls,trace-cmp")
+
+if(NOT LIB_FUZZING_ENGINE)
+  set(fuzz "${fuzz} ${asan} ${ubsan}")
+  set(fuzz "${fuzz} -fsanitize=fuzzer-no-link")
+else()
+  # specialhandling: oss-fuzz provides all the needed flags already.
+  message(STATUS "LIB_FUZZING_ENGINE override option is passed, not setting special compiler flags.")
+endif()
+
 set(fuzz "${fuzz} -DFUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION")
 SET(CMAKE_CXX_FLAGS_FUZZ
     "${fuzz}"

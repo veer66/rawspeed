@@ -23,17 +23,21 @@
 #include "common/DngOpcodes.h"
 #include "common/Common.h"                // for uint32, ushort16, clampBits
 #include "common/Mutex.h"                 // for MutexLocker
-#include "common/Point.h"                 // for iPoint2D, iRectangle2D
+#include "common/Point.h"                 // for iRectangle2D, iPoint2D
 #include "common/RawImage.h"              // for RawImage, RawImageData
-#include "decoders/RawDecoderException.h" // for RawDecoderException (ptr o...
+#include "decoders/RawDecoderException.h" // for ThrowRDE
 #include "io/ByteStream.h"                // for ByteStream
-#include "io/Endianness.h"                // for getHostEndianness, Endiann...
+#include "io/Endianness.h"                // for Endianness, Endianness::big
 #include "tiff/TiffEntry.h"               // for TiffEntry
-#include <algorithm>                      // for fill_n
+#include <algorithm>                      // for generate_n, fill_n
 #include <cassert>                        // for assert
 #include <cmath>                          // for pow
+#include <iterator>                       // for back_insert_iterator
+#include <limits>                         // for numeric_limits
 #include <stdexcept>                      // for out_of_range
 #include <tuple>                          // for tie, tuple
+// IWYU pragma: no_include <ext/alloc_traits.h>
+// IWYU pragma: no_include <type_traits>
 
 using std::vector;
 using std::fill_n;
@@ -61,7 +65,7 @@ class DngOpcodes::FixBadPixelsConstant final : public DngOpcodes::DngOpcode {
   uint32 value;
 
 public:
-  explicit FixBadPixelsConstant(ByteStream* bs) {
+  explicit FixBadPixelsConstant(const RawImage& ri, ByteStream* bs) {
     value = bs->getU32();
     bs->getU32(); // Bayer Phase not used
   }
@@ -91,31 +95,101 @@ public:
 
 // ****************************************************************************
 
+class DngOpcodes::ROIOpcode : public DngOpcodes::DngOpcode {
+  iRectangle2D roi;
+
+protected:
+  explicit ROIOpcode(const RawImage& ri, ByteStream* bs, bool minusOne) {
+    const iRectangle2D fullImage =
+        minusOne ? iRectangle2D(0, 0, ri->dim.x - 1, ri->dim.y - 1)
+                 : iRectangle2D(0, 0, ri->dim.x, ri->dim.y);
+
+    uint32 top = bs->getU32();
+    uint32 left = bs->getU32();
+    uint32 bottom = bs->getU32();
+    uint32 right = bs->getU32();
+
+    const iPoint2D topLeft(left, top);
+    const iPoint2D bottomRight(right, bottom);
+
+    if (!(fullImage.isPointInside(topLeft) &&
+          fullImage.isPointInside(bottomRight) && bottomRight >= topLeft)) {
+      ThrowRDE("Rectangle (%u, %u, %u, %u) not inside image (%u, %u, %u, %u).",
+               topLeft.x, topLeft.y, bottomRight.x, bottomRight.y,
+               fullImage.getTopLeft().x, fullImage.getTopLeft().y,
+               fullImage.getBottomRight().x, fullImage.getBottomRight().y);
+    }
+
+    roi.setTopLeft(topLeft);
+    roi.setBottomRightAbsolute(bottomRight);
+    assert(roi.isThisInside(fullImage));
+  }
+
+  const iRectangle2D& __attribute__((pure)) getRoi() const { return roi; }
+};
+
+// ****************************************************************************
+
+class DngOpcodes::DummyROIOpcode final : public ROIOpcode {
+public:
+  explicit DummyROIOpcode(const RawImage& ri, ByteStream* bs)
+      : ROIOpcode(ri, bs, true) {}
+
+  const iRectangle2D& __attribute__((pure)) getRoi() const {
+    return ROIOpcode::getRoi();
+  }
+
+  [[noreturn]] void apply(const RawImage& ri) final {
+    assert(false && "You should not be calling this.");
+    __builtin_unreachable();
+  }
+};
+
+// ****************************************************************************
+
 class DngOpcodes::FixBadPixelsList final : public DngOpcodes::DngOpcode {
   std::vector<uint32> badPixels;
 
 public:
-  explicit FixBadPixelsList(ByteStream* bs) {
+  explicit FixBadPixelsList(const RawImage& ri, ByteStream* bs) {
+    const iRectangle2D fullImage(0, 0, ri->getUncroppedDim().x - 1,
+                                 ri->getUncroppedDim().y - 1);
+
     bs->getU32(); // Skip phase - we don't care
     auto badPointCount = bs->getU32();
     auto badRectCount = bs->getU32();
 
+    // first, check that we indeed have much enough data
+    const auto origPos = bs->getPosition();
+    bs->skipBytes(badPointCount, 2 * 4);
+    bs->skipBytes(badRectCount, 4 * 4);
+    bs->setPosition(origPos);
+
     // Read points
+    badPixels.reserve(badPixels.size() + badPointCount);
     for (auto i = 0U; i < badPointCount; ++i) {
       auto y = bs->getU32();
       auto x = bs->getU32();
-      badPixels.push_back(y << 16 | x);
+
+      const iPoint2D badPoint(x, y);
+      if (!fullImage.isPointInside(badPoint))
+        ThrowRDE("Bad point not inside image.");
+
+      badPixels.emplace_back(y << 16 | x);
     }
 
     // Read rects
     for (auto i = 0U; i < badRectCount; ++i) {
-      auto top = bs->getU32();
-      auto left = bs->getU32();
-      auto bottom = bs->getU32();
-      auto right = bs->getU32();
-      for (auto y = top; y <= bottom; ++y) {
-        for (auto x = left; x <= right; ++x) {
-          badPixels.push_back(y << 16 | x);
+      const DummyROIOpcode dummy(ri, bs);
+
+      const iRectangle2D badRect = dummy.getRoi();
+      assert(badRect.isThisInside(fullImage));
+
+      auto area = (1 + badRect.getHeight()) * (1 + badRect.getWidth());
+      badPixels.reserve(badPixels.size() + area);
+      for (auto y = badRect.getTop(); y <= badRect.getBottom(); ++y) {
+        for (auto x = badRect.getLeft(); x <= badRect.getRight(); ++x) {
+          badPixels.emplace_back(y << 16 | x);
         }
       }
     }
@@ -130,34 +204,10 @@ public:
 
 // ****************************************************************************
 
-class DngOpcodes::ROIOpcode : public DngOpcodes::DngOpcode {
-  iRectangle2D roi;
-
-protected:
-  explicit ROIOpcode(ByteStream* bs) {
-    uint32 top = bs->getU32();
-    uint32 left = bs->getU32();
-    uint32 bottom = bs->getU32();
-    uint32 right = bs->getU32();
-
-    roi = iRectangle2D(left, top, right - left, bottom - top);
-  }
-
-  const iRectangle2D& __attribute__((pure)) getRoi() const { return roi; }
-
-  void setup(const RawImage& ri) override {
-    iRectangle2D fullImage(0, 0, ri->dim.x, ri->dim.y);
-
-    if (!roi.isThisInside(fullImage))
-      ThrowRDE("Area of interest not inside image.");
-  }
-};
-
-// ****************************************************************************
-
 class DngOpcodes::TrimBounds final : public ROIOpcode {
 public:
-  explicit TrimBounds(ByteStream* bs) : ROIOpcode(bs) {}
+  explicit TrimBounds(const RawImage& ri, ByteStream* bs)
+      : ROIOpcode(ri, bs, false) {}
 
   void apply(const RawImage& ri) override { ri->subFrame(getRoi()); }
 };
@@ -171,22 +221,25 @@ class DngOpcodes::PixelOpcode : public ROIOpcode {
   uint32 colPitch;
 
 protected:
-  explicit PixelOpcode(ByteStream* bs) : ROIOpcode(bs) {
+  explicit PixelOpcode(const RawImage& ri, ByteStream* bs)
+      : ROIOpcode(ri, bs, false) {
     firstPlane = bs->getU32();
     planes = bs->getU32();
+
+    if (planes == 0 || firstPlane > ri->getCpp() || planes > ri->getCpp() ||
+        firstPlane + planes > ri->getCpp()) {
+      ThrowRDE("Bad plane params (first %u, num %u), got planes = %u",
+               firstPlane, planes, ri->getCpp());
+    }
+
     rowPitch = bs->getU32();
     colPitch = bs->getU32();
 
-    if (planes == 0)
-      ThrowRDE("Zero planes");
-    if (rowPitch == 0 || colPitch == 0)
-      ThrowRDE("Invalid pitch");
-  }
+    const iRectangle2D& ROI = getRoi();
 
-  void setup(const RawImage& ri) override {
-    ROIOpcode::setup(ri);
-    if (firstPlane + planes > ri->getCpp())
-      ThrowRDE("Not that many planes in actual image");
+    if (rowPitch < 1 || rowPitch > static_cast<uint32>(ROI.getHeight()) ||
+        colPitch < 1 || colPitch > static_cast<uint32>(ROI.getWidth()))
+      ThrowRDE("Invalid pitch");
   }
 
   // traverses the current ROI and applies the operation OP to each pixel,
@@ -199,6 +252,8 @@ protected:
       auto* src = reinterpret_cast<T*>(ri->getData(0, y));
       // Add offset, so this is always first plane
       src += firstPlane;
+      // FIXME: is op() really supposed to recieve global image coordinates,
+      // and not [0..ROI.getHeight()-1][0..ROI.getWidth()-1] ?
       for (auto x = ROI.getLeft(); x < ROI.getRight(); x += colPitch) {
         for (auto p = 0U; p < planes; ++p)
           src[x * cpp + p] = op(x, y, src[x * cpp + p]);
@@ -213,7 +268,8 @@ class DngOpcodes::LookupOpcode : public PixelOpcode {
 protected:
   vector<ushort16> lookup;
 
-  explicit LookupOpcode(ByteStream* bs) : PixelOpcode(bs), lookup(65536) {}
+  explicit LookupOpcode(const RawImage& ri, ByteStream* bs)
+      : PixelOpcode(ri, bs), lookup(65536) {}
 
   void setup(const RawImage& ri) override {
     PixelOpcode::setup(ri);
@@ -231,7 +287,7 @@ protected:
 
 class DngOpcodes::TableMap final : public LookupOpcode {
 public:
-  explicit TableMap(ByteStream* bs) : LookupOpcode(bs) {
+  explicit TableMap(const RawImage& ri, ByteStream* bs) : LookupOpcode(ri, bs) {
     auto count = bs->getU32();
 
     if (count == 0 || count > 65536)
@@ -249,16 +305,18 @@ public:
 
 class DngOpcodes::PolynomialMap final : public LookupOpcode {
 public:
-  explicit PolynomialMap(ByteStream* bs) : LookupOpcode(bs) {
+  explicit PolynomialMap(const RawImage& ri, ByteStream* bs)
+      : LookupOpcode(ri, bs) {
     vector<double> polynomial;
 
-    polynomial.resize(bs->getU32() + 1UL);
-
-    if (polynomial.size() > 9)
+    const auto polynomial_size = bs->getU32() + 1UL;
+    bs->check(8UL * polynomial_size);
+    if (polynomial_size > 9)
       ThrowRDE("A polynomial with more than 8 degrees not allowed");
 
-    for (auto& coeff : polynomial)
-      coeff = bs->get<double>();
+    polynomial.reserve(polynomial_size);
+    std::generate_n(std::back_inserter(polynomial), polynomial_size,
+                    [&bs]() { return bs->get<double>(); });
 
     // Create lookup
     lookup.resize(65536);
@@ -284,55 +342,122 @@ public:
   };
 
 protected:
+  DeltaRowOrColBase(const RawImage& ri, ByteStream* bs) : PixelOpcode(ri, bs) {}
+};
+
+template <typename S>
+class DngOpcodes::DeltaRowOrCol : public DeltaRowOrColBase {
+public:
+  void setup(const RawImage& ri) override {
+    PixelOpcode::setup(ri);
+
+    // If we are working on a float image, no need to convert to int
+    if (ri->getDataType() != TYPE_USHORT16)
+      return;
+
+    deltaI.reserve(deltaF.size());
+    for (const auto f : deltaF) {
+      if (!valueIsOk(f))
+        ThrowRDE("Got float %f which is unacceptable.", f);
+      deltaI.emplace_back(static_cast<int>(f2iScale * f));
+    }
+  }
+
+protected:
+  const float f2iScale;
   vector<float> deltaF;
   vector<int> deltaI;
 
-  DeltaRowOrColBase(ByteStream* bs, float f2iScale) : PixelOpcode(bs) {
-    deltaF.resize(bs->getU32());
+  // only meaningful for ushort16 images!
+  virtual bool valueIsOk(float value) = 0;
 
-    for (auto& f : deltaF)
-      f = bs->get<float>();
+  DeltaRowOrCol(const RawImage& ri, ByteStream* bs, float f2iScale_)
+      : DeltaRowOrColBase(ri, bs), f2iScale(f2iScale_) {
+    const auto deltaF_count = bs->getU32();
+    bs->check(deltaF_count, 4);
 
-    deltaI.reserve(deltaF.size());
-    for (auto f : deltaF)
-      deltaI.emplace_back(static_cast<int>(f2iScale * f));
+    // See PixelOpcode::applyOP(). We will access deltaF/deltaI up to (excl.)
+    // either ROI.getRight() or ROI.getBottom() index. Thus, we need to have
+    // either ROI.getRight() or ROI.getBottom() elements in there.
+    // FIXME: i guess not strictly true with pitch != 1.
+    const auto expectedSize =
+        S::select(getRoi().getRight(), getRoi().getBottom());
+    if (expectedSize != deltaF_count) {
+      ThrowRDE("Got unexpected number of elements (%u), expected %u.",
+               expectedSize, deltaF_count);
+    }
+
+    deltaF.reserve(deltaF_count);
+    std::generate_n(std::back_inserter(deltaF), deltaF_count, [&bs]() {
+      const auto F = bs->get<float>();
+      if (!std::isfinite(F))
+        ThrowRDE("Got bad float %f.", F);
+      return F;
+    });
   }
 };
 
 // ****************************************************************************
 
 template <typename S>
-class DngOpcodes::OffsetPerRowOrCol final : public DeltaRowOrColBase {
+class DngOpcodes::OffsetPerRowOrCol final : public DeltaRowOrCol<S> {
+  // We have pixel value in range of [0..65535]. We apply some offset X.
+  // For this to generate a value within the same range , the offset X needs
+  // to have an absolute value of 65535. Since the offset is multiplied
+  // by f2iScale before applying, we need to divide by f2iScale here.
+  const double absLimit;
+
+  bool valueIsOk(float value) final { return std::abs(value) <= absLimit; }
+
 public:
-  explicit OffsetPerRowOrCol(ByteStream* bs)
-      : DeltaRowOrColBase(bs, 65535.0F) {}
+  explicit OffsetPerRowOrCol(const RawImage& ri, ByteStream* bs)
+      : DeltaRowOrCol<S>(ri, bs, 65535.0F),
+        absLimit(double(std::numeric_limits<ushort16>::max()) /
+                 this->f2iScale) {}
 
   void apply(const RawImage& ri) override {
     if (ri->getDataType() == TYPE_USHORT16) {
-      applyOP<ushort16>(ri, [this](uint32 x, uint32 y, ushort16 v) {
-        return clampBits(deltaI[S::select(x, y)] + v, 16);
-      });
+      this->template applyOP<ushort16>(
+          ri, [this](uint32 x, uint32 y, ushort16 v) {
+            return clampBits(this->deltaI[S::select(x, y)] + v, 16);
+          });
     } else {
-      applyOP<float>(ri, [this](uint32 x, uint32 y, float v) {
-        return deltaF[S::select(x, y)] + v;
+      this->template applyOP<float>(ri, [this](uint32 x, uint32 y, float v) {
+        return this->deltaF[S::select(x, y)] + v;
       });
     }
   }
 };
 
 template <typename S>
-class DngOpcodes::ScalePerRowOrCol final : public DeltaRowOrColBase {
+class DngOpcodes::ScalePerRowOrCol final : public DeltaRowOrCol<S> {
+  // We have pixel value in range of [0..65535]. We scale by float X.
+  // For this to generate a value within the same range , the scale X needs
+  // to be in the range [0..65535]. Since the offset is multiplied
+  // by f2iScale before applying, we need to divide by f2iScale here.
+  // So the maxLimit has the same value as absLimit for OffsetPerRowOrCol.
+  static constexpr const double minLimit = 0.0;
+  const double maxLimit;
+
+  bool valueIsOk(float value) final {
+    return value >= minLimit && value <= maxLimit;
+  }
+
 public:
-  explicit ScalePerRowOrCol(ByteStream* bs) : DeltaRowOrColBase(bs, 1024.0F) {}
+  explicit ScalePerRowOrCol(const RawImage& ri, ByteStream* bs)
+      : DeltaRowOrCol<S>(ri, bs, 1024.0F),
+        maxLimit(double(std::numeric_limits<ushort16>::max()) /
+                 this->f2iScale) {}
 
   void apply(const RawImage& ri) override {
     if (ri->getDataType() == TYPE_USHORT16) {
-      applyOP<ushort16>(ri, [this](uint32 x, uint32 y, ushort16 v) {
-        return clampBits((deltaI[S::select(x, y)] * v + 512) >> 10, 16);
+      this->template applyOP<ushort16>(ri, [this](uint32 x, uint32 y,
+                                                  ushort16 v) {
+        return clampBits((this->deltaI[S::select(x, y)] * v + 512) >> 10, 16);
       });
     } else {
-      applyOP<float>(ri, [this](uint32 x, uint32 y, float v) {
-        return deltaF[S::select(x, y)] * v;
+      this->template applyOP<float>(ri, [this](uint32 x, uint32 y, float v) {
+        return this->deltaF[S::select(x, y)] * v;
       });
     }
   }
@@ -340,23 +465,39 @@ public:
 
 // ****************************************************************************
 
-DngOpcodes::DngOpcodes(TiffEntry* entry) {
+DngOpcodes::DngOpcodes(const RawImage& ri, TiffEntry* entry) {
   ByteStream bs = entry->getData();
+
   // DNG opcodes are always stored in big-endian byte order.
-  bs.setInNativeByteOrder(getHostEndianness() == big);
+  bs.setByteOrder(Endianness::big);
 
   const auto opcode_count = bs.getU32();
+  auto origPos = bs.getPosition();
+
+  // validate opcode count. we either have to do this, or we can't preallocate
+  for (auto i = 0U; i < opcode_count; i++) {
+    bs.skipBytes(4); // code
+    bs.skipBytes(4); // version
+    bs.skipBytes(4); // flags
+    const auto opcode_size = bs.getU32();
+    bs.skipBytes(opcode_size);
+  }
+
+  bs.setPosition(origPos);
+
+  // okay, we may indeed have that many opcodes in here. now let's reserve
   opcodes.reserve(opcode_count);
 
   for (auto i = 0U; i < opcode_count; i++) {
     auto code = bs.getU32();
-    bs.getU32(); // ignore version
+    bs.skipBytes(4); // ignore version
 #ifdef DEBUG
-    bs.getU32(); // ignore flags
+    bs.skipBytes(4); // ignore flags
 #else
     auto flags = bs.getU32();
 #endif
-    auto expected_pos = bs.getU32() + bs.getPosition();
+    const auto opcode_size = bs.getU32();
+    ByteStream opcode_bs = bs.getStream(opcode_size);
 
     const char* opName = nullptr;
     constructor_t opConstructor = nullptr;
@@ -367,7 +508,7 @@ DngOpcodes::DngOpcodes(TiffEntry* entry) {
     }
 
     if (opConstructor != nullptr)
-      opcodes.emplace_back(opConstructor(&bs));
+      opcodes.emplace_back(opConstructor(ri, &opcode_bs));
     else {
 #ifndef DEBUG
       // Throw Error if not marked as optional
@@ -376,11 +517,13 @@ DngOpcodes::DngOpcodes(TiffEntry* entry) {
         ThrowRDE("Unsupported Opcode: %d (%s)", code, opName);
     }
 
-    if (bs.getPosition() != expected_pos)
+    if (opcode_bs.getRemainSize() != 0)
       ThrowRDE("Inconsistent length of opcode");
   }
 
+#ifdef DEBUG
   assert(opcodes.size() == opcode_count);
+#endif
 }
 
 // defined here as empty destrutor, otherwise we'd need a complete definition
@@ -395,8 +538,9 @@ void DngOpcodes::applyOpCodes(const RawImage& ri) {
 }
 
 template <class Opcode>
-std::unique_ptr<DngOpcodes::DngOpcode> DngOpcodes::constructor(ByteStream* bs) {
-  return make_unique<Opcode>(bs);
+std::unique_ptr<DngOpcodes::DngOpcode>
+DngOpcodes::constructor(const RawImage& ri, ByteStream* bs) {
+  return std::make_unique<Opcode>(ri, bs);
 }
 
 // ALL opcodes specified in DNG Specification MUST be listed here.

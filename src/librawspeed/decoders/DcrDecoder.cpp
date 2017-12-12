@@ -21,7 +21,7 @@
 
 #include "decoders/DcrDecoder.h"
 #include "common/Common.h"                // for uint32, uchar8, ushort16
-#include "common/TableLookUp.h"           // for TableLookUp
+#include "common/NORangesSet.h"           // for NORangesSet
 #include "decoders/RawDecoderException.h" // for RawDecoderException (ptr o...
 #include "decompressors/HuffmanTable.h"   // for HuffmanTable
 #include "io/ByteStream.h"                // for ByteStream
@@ -49,6 +49,11 @@ bool DcrDecoder::isAppropriateDecoder(const TiffRootIFD* rootIFD,
   return make == "Kodak";
 }
 
+void DcrDecoder::checkImageDimensions() {
+  if (width > 4516 || height > 3012)
+    ThrowRDE("Unexpected image dimensions found: (%u; %u)", width, height);
+}
+
 RawImage DcrDecoder::decodeRawInternal() {
   SimpleTiffDecoder::prepareForRawDecoding();
 
@@ -60,8 +65,10 @@ RawImage DcrDecoder::decodeRawInternal() {
     if (!ifdoffset)
       ThrowRDE("Couldn't find the Kodak IFD offset");
 
+    NORangesSet<Buffer> ifds;
+
     assert(ifdoffset != nullptr);
-    TiffRootIFD kodakifd(nullptr, ifdoffset->getRootIfdData(),
+    TiffRootIFD kodakifd(nullptr, &ifds, ifdoffset->getRootIfdData(),
                          ifdoffset->getU32());
 
     TiffEntry *linearization = kodakifd.getEntryRecursive(KODAK_LINEARIZATION);
@@ -72,8 +79,7 @@ RawImage DcrDecoder::decodeRawInternal() {
     assert(linearization != nullptr);
     auto linTable = linearization->getU16Array(1024);
 
-    if (!uncorrectedRawValues)
-      mRaw->setTable(linTable, true);
+    RawImageCurveGuard curveHandler(&mRaw, linTable, uncorrectedRawValues);
 
     // FIXME: dcraw does all sorts of crazy things besides this to fetch
     //        WB from what appear to be presets and calculate it in weird ways
@@ -91,12 +97,6 @@ RawImage DcrDecoder::decodeRawInternal() {
     } catch (IOException &) {
       mRaw->setError("IO error occurred while reading image. Returning partial result.");
     }
-
-    // Set the table, if it should be needed later.
-    if (uncorrectedRawValues)
-      mRaw->setTable(linTable, false);
-    else
-      mRaw->setTable(nullptr);
   } else
     ThrowRDE("Unsupported compression %d", compression);
 

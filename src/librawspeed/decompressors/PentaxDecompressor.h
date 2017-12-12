@@ -21,23 +21,31 @@
 
 #pragma once
 
-#include "common/Common.h" // for uint32
+#include "common/Common.h"                      // for uint32
+#include "common/RawImage.h"                    // for RawImage, RawImageData
 #include "decompressors/AbstractDecompressor.h" // for AbstractDecompressor
+#include "decompressors/HuffmanTable.h"         // for HuffmanTable
 
 namespace rawspeed {
 
 class ByteStream;
 
-class RawImage;
-
 class TiffIFD;
 
 class PentaxDecompressor final : public AbstractDecompressor {
+  RawImage mRaw;
+  const HuffmanTable ht;
+
 public:
-  static void decompress(const RawImage& mRaw, ByteStream&& data,
-                         TiffIFD* root);
+  PentaxDecompressor(const RawImage& img, ByteStream* metaData);
+
+  void decompress(const ByteStream& data) const;
 
 private:
+  static HuffmanTable SetupHuffmanTable_Legacy();
+  static HuffmanTable SetupHuffmanTable_Modern(ByteStream stream);
+  static HuffmanTable SetupHuffmanTable(ByteStream* metaData);
+
   static const uchar8 pentax_tree[][2][16];
 };
 

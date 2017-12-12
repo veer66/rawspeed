@@ -30,6 +30,7 @@
 #include "common/TableLookUp.h"        // for TableLookUp
 #include "metadata/BlackArea.h"        // for BlackArea
 #include "metadata/ColorFilterArray.h" // for ColorFilterArray
+#include <array>                       // for array
 #include <memory>                      // for unique_ptr, operator==
 #include <string>                      // for string
 #include <vector>                      // for vector
@@ -115,6 +116,8 @@ public:
   void createData();
   void poisonPadding();
   void unpoisonPadding();
+  void checkRowIsInitialized(int row);
+  void checkMemIsInitialized();
   void destroyData();
   void blitFrom(const RawImage& src, const iPoint2D& srcPos,
                 const iPoint2D& size, const iPoint2D& destPos);
@@ -148,7 +151,7 @@ public:
   bool isCFA{true};
   ColorFilterArray cfa;
   int blackLevel = -1;
-  int blackLevelSeparate[4];
+  std::array<int, 4> blackLevelSeparate;
   int whitePoint = 65536;
   std::vector<BlackArea> blackAreas;
 
@@ -195,7 +198,7 @@ public:
 
 protected:
   void scaleValues_plain(int start_y, int end_y);
-#if (defined(_MSC_VER) && _MSC_VER > 1399) || defined(__SSE2__)
+#ifdef WITH_SSE2
   void scaleValues_SSE2(int start_y, int end_y);
 #endif
   void scaleValues(int start_y, int end_y) override;
@@ -291,5 +294,29 @@ inline void RawImageDataU16::setWithLookUp(ushort16 value, uchar8* dst, uint32* 
   }
   *dest = table->tables[value];
 }
+
+class RawImageCurveGuard final {
+  RawImage* mRaw;
+  const std::vector<ushort16>& curve;
+  const bool uncorrectedRawValues;
+
+public:
+  RawImageCurveGuard(RawImage* raw, const std::vector<ushort16>& curve_,
+                     bool uncorrectedRawValues_)
+      : mRaw(raw), curve(curve_), uncorrectedRawValues(uncorrectedRawValues_) {
+    if (uncorrectedRawValues)
+      return;
+
+    (*mRaw)->setTable(curve, true);
+  }
+
+  ~RawImageCurveGuard() {
+    // Set the table, if it should be needed later.
+    if (uncorrectedRawValues)
+      (*mRaw)->setTable(curve, false);
+    else
+      (*mRaw)->setTable(nullptr);
+  }
+};
 
 } // namespace rawspeed

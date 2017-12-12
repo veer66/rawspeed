@@ -20,26 +20,47 @@
 */
 
 #include "decompressors/Cr2Decompressor.h"
-#include "common/Common.h"                // for unroll_loop, uint32, ushort16
+#include "common/Common.h"                // for uint32, unroll_loop, ushort16
 #include "common/Point.h"                 // for iPoint2D
 #include "common/RawImage.h"              // for RawImage, RawImageData
 #include "decoders/RawDecoderException.h" // for ThrowRDE
-#include "io/BitPumpJPEG.h"               // for BitStream<>::getBufferPosi...
-#include "io/ByteStream.h"                // for ByteStream
-#include <algorithm>                      // for min, copy_n, move
+#include "io/BitPumpJPEG.h"               // for BitPumpJPEG
+#include <algorithm>                      // for move, copy_n
 #include <cassert>                        // for assert
+#include <numeric>                        // for accumulate
 
 using std::copy_n;
 
 namespace rawspeed {
+
+Cr2Decompressor::Cr2Decompressor(const ByteStream& bs, const RawImage& img)
+    : AbstractLJpegDecompressor(bs, img) {
+  if (mRaw->getDataType() != TYPE_USHORT16)
+    ThrowRDE("Unexpected data type");
+
+  if (!((mRaw->getCpp() == 1 && mRaw->getBpp() == 2) ||
+        (mRaw->getCpp() == 3 && mRaw->getBpp() == 6)))
+    ThrowRDE("Unexpected cpp: %u", mRaw->getCpp());
+
+  if (!mRaw->dim.x || !mRaw->dim.y || mRaw->dim.x > 8896 ||
+      mRaw->dim.y > 5920) {
+    ThrowRDE("Unexpected image dimensions found: (%u; %u)", mRaw->dim.x,
+             mRaw->dim.y);
+  }
+}
 
 void Cr2Decompressor::decodeScan()
 {
   if (predictorMode != 1)
     ThrowRDE("Unsupported predictor mode.");
 
-  if (slicesWidths.empty())
-    slicesWidths.push_back(frame.w * frame.cps);
+  if (slicesWidths.empty()) {
+    const int slicesWidth = frame.w * frame.cps;
+    if (slicesWidth > mRaw->dim.x)
+      ThrowRDE("Don't know slicing pattern, and failed to guess it.");
+
+    slicesWidths.push_back(slicesWidth);
+  }
 
   bool isSubSampled = false;
   for (uint32 i = 0; i < frame.cps;  i++)
@@ -129,6 +150,15 @@ void Cr2Decompressor::decodeN_X_Y()
       sliceWidth = sliceWidth * 3 / 2;
   }
 
+  for (const auto& slicesWidth : slicesWidths) {
+    if (slicesWidth > mRaw->dim.x)
+      ThrowRDE("Slice is longer than image's height, which is unsupported.");
+  }
+
+  if (frame.h * std::accumulate(slicesWidths.begin(), slicesWidths.end(), 0) <
+      mRaw->dim.area())
+    ThrowRDE("Incorrrect slice height / slice widths! Less than image size.");
+
   // To understand the CR2 slice handling and sampling factor behavior, see
   // https://github.com/lclevy/libcraw2/blob/master/docs/cr2_lossless.pdf?raw=true
 
@@ -171,7 +201,7 @@ void Cr2Decompressor::decodeN_X_Y()
 
         if (X_S_F == 1) { // will be optimized out
           unroll_loop<N_COMP>([&](int i) {
-            *dest++ = pred[i] += ht[i]->decodeNext(bitStream);
+            dest[i] = pred[i] += ht[i]->decodeNext(bitStream);
           });
         } else {
           unroll_loop<Y_S_F>([&](int i) {
@@ -181,15 +211,15 @@ void Cr2Decompressor::decodeN_X_Y()
 
           dest[1] = pred[1] += ht[1]->decodeNext(bitStream);
           dest[2] = pred[2] += ht[2]->decodeNext(bitStream);
-
-          dest += xStepSize;
         }
+
+        dest += xStepSize;
         processedPixels += X_S_F;
       }
+
       processedLineSlices += yStepSize;
     }
   }
-  input.skipBytes(bitStream.getBufferPosition());
 }
 
 } // namespace rawspeed
